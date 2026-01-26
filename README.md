@@ -26,13 +26,20 @@ i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=i686 -mtune=pentium3 
 Afterwards, you need an LLM and a tokenizer. Currently the scope of this project is so small that it only somewhat supports the SmollerLM family of LLMs by mehmetkeremturkcan on HuggingFace, and no other models currently work. Choose one of his models in that family (I personally went with [this 10 million parameter one](https://huggingface.co/mehmetkeremturkcan/SmollerLM2-10M-sftb), [this 20M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-20M-Instruct-PrunedPostTrained-sft2), [and this 48M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-48M-Instruct-ft-sft)), then...
 
 ```
+pip install -r requirements.txt # Install it in a venv, silly. :3
+```
+
+```
 python export-smol.py smollerlm2_20m_q80.bin --hf mehmetkeremturkcan/SmollerLM2-10M-sftb
+```
+
+```
 python export_tokenizer.py --hf mehmetkeremturkcan/SmollerLM2-10M-sftb -o smoller_tokenizer.bin
 ```
 
 Now you'll have the model and tokenizer in a llama2.c-ish INT8 format. Next, put the tokenizer, model and executable onto a Windows 95 machine, making sure it has at least 64 megabytes of ram.
 
-Finally you can run it with something like
+Finally on Windows 95, you can run it with something like
 
 ```
 run_smol.exe smollerlm2_10m_q80.bin -n 256 -z smoller_tokenizer.bin -m chat
