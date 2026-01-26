@@ -45,7 +45,7 @@ Finally on Windows 95, you can run it with something like
 run_smol.exe smollerlm2_10m_q80.bin -n 256 -z smoller_tokenizer.bin -m chat
 ```
 
-and interact with it more or less like you would in Ollama. It will take several seconds to a minute to load, and doesn't have a proper indicator of if you pressed enter... and also has a broken TUI "scrollbar" that I haven't fixed. But otherwise, this is a real LLM that can run on really era-inappropriate hardware/software!
+and interact with it more or less like you would in Ollama. It will take several seconds to a minute to load, and doesn't have a proper indicator of if you pressed enter... and also has a broken TUI "scrollbar" that I haven't fixed, requiring you to use PageUp and PageDown to scroll through the chat history. But otherwise, this is a real LLM that can run on really era-inappropriate hardware/software!
 
 Since I ended up losing the CLI flags along the way, they're more or less the same as llama2.c's.
 
