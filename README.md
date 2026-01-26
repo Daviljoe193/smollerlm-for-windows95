@@ -1,6 +1,8 @@
 # smollerlm-for-windows95
 Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3.
 
+![](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/main/llamac-smol-ghdemo.avif)
+
 ---
 
 This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for Windows 95.
@@ -36,7 +38,7 @@ pip install -r requirements.txt # Install it in a venv, silly. :3
 ```
 
 ```
-python export-smol.py smollerlm2_20m_q80.bin --hf mehmetkeremturkcan/SmollerLM2-10M-sftb
+python export-smol.py smollerlm2_10m_q80.bin --hf mehmetkeremturkcan/SmollerLM2-10M-sftb
 ```
 
 ```
@@ -68,3 +70,11 @@ Options:
 ```
 
 I'm not sure how often I'll update this project, but I hope anyone who finds this has fun! :D
+
+---
+
+### Inspiration
+
+Inspiration came from messing around with small LLMs (I do this a lot, since it's free), then coming across [mehmetkeremturkcan](https://huggingface.co/mehmetkeremturkcan)'s unusually small LLMs that had an abnormally SmolLM-like chat template. Converting his 10M model to q_8 GGUFs, I noticed that the model size was so absurdly small that it'd fit onto 10 floppy disks. Then I though Windows 95 running an LLM like this must've been possible.
+
+One thing let to another, and I spent several days making that stupid joke of an idea real. That's it, that's the depth of the story. This was never meant to be a serious project, but it was a fun one, and worth it.
