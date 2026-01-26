@@ -11,6 +11,12 @@ To run it, first you'll need Ubuntu 24.04 LTS or later (Or earlier, I guess? Thi
 git clone https://github.com/Daviljoe193/smollerlm-for-windows95
 ```
 
+and also
+
+```
+sudo apt install mingw-w64
+```
+
 Then compile it with SSE support (For Windows 9x, I'd recommend [JHRobotics/simd95](https://github.com/JHRobotics/simd95), the speed boost is worth it) using
 
 ```
