@@ -1,6 +1,6 @@
 /* Inference for Llama-2 Transformer model in pure C */
 /* Optimized for Windows 9x (Low RAM) & Pentium 3 (SSE) */
-/* V9.0: Top-Down Terminal, Visual Fixes, Win32 API IO */
+/* V9.1: Top-Down Terminal, Visual Fixes, Win32 API IO, Generate Mode & Stats */
 
 #pragma GCC optimize("fast-math")
 
@@ -191,7 +191,7 @@ void load_weights(Transformer* t, int shared_weights) {
 }
 
 void build_transformer(Transformer *t, char* checkpoint_path, int steps) {
-    FILE *file = fopen(checkpoint_path, "rb"); if (!file) exit(1);
+    FILE *file = fopen(checkpoint_path, "rb"); if (!file) { fprintf(stderr, "File not found: %s\n", checkpoint_path); exit(1); }
     uint32_t magic; fread(&magic, sizeof(uint32_t), 1, file);
     int version; fread(&version, sizeof(int), 1, file);
     fread(&t->config, sizeof(int) * 8, 1, file);
@@ -589,14 +589,64 @@ void tui_draw() {
 #endif
 
 // ----------------------------------------------------------------------------
+// GENERATION LOGIC (ONE-SHOT)
+// ----------------------------------------------------------------------------
+
+void generate(Transformer *t, Tokenizer *tok, Sampler *samp, char *prompt, int steps) {
+    if (prompt == NULL) prompt = "";
+
+    // Encode
+    int num_prompt_tokens = 0;
+    int* prompt_tokens = (int*)malloc((strlen(prompt)+3) * sizeof(int));
+    encode(tok, prompt, 1, 0, prompt_tokens, &num_prompt_tokens);
+    if (num_prompt_tokens < 1) { fprintf(stderr, "Something is wrong, expected at least 1 prompt token\n"); exit(1); }
+
+    // Start loop
+    long start = 0; 
+    int next;
+    int token = prompt_tokens[0]; 
+    int pos = 0;
+    
+    while (pos < steps) {
+        if (stop_generation) { printf("\n^C Interrupted"); break; }
+
+        float* logits = forward(t, token, pos, steps);
+
+        if (pos < num_prompt_tokens - 1) {
+            next = prompt_tokens[pos + 1];
+        } else {
+            next = sample(samp, logits);
+        }
+        pos++;
+
+        if (next == 2) break; // EOS
+
+        char* piece = decode(tok, token, next);
+        // Print
+        if (piece) { printf("%s", piece); fflush(stdout); }
+        token = next;
+
+        if (start == 0) start = time_in_ms();
+    }
+    printf("\n");
+
+    if (pos > 1) {
+        long end = time_in_ms();
+        fprintf(stderr, "achieved tok/s: %f\n", (pos-1) / (double)(end-start)*1000);
+    }
+    free(prompt_tokens);
+}
+
+// ----------------------------------------------------------------------------
 // CHAT LOGIC
 // ----------------------------------------------------------------------------
 
-void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use_tui) {
+void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use_tui, char* cli_system_prompt) {
     int id_im_start = 1; int id_im_end = 2; int id_nl = 198;    
     int id_system = 9690; int id_user = 4093; int id_ass1 = 520; int id_ass2 = 9531;   
     
     char* sys_prompt = "You are SmolLM, a helpful assistant.";
+    if (cli_system_prompt != NULL) sys_prompt = cli_system_prompt;
     
     int* tokens = malloc(n_ctx * sizeof(int));
     int n_tok = 0, n_chunk = 0;
@@ -729,9 +779,25 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
     free(tokens);
 }
 
+void error_usage() {
+    fprintf(stderr, "Usage:   run <checkpoint> [options]\n");
+    fprintf(stderr, "Example: run model.bin -n 256 -i \"Once upon a time\"\n");
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -t <float>  temperature in [0,inf], default 1.0\n");
+    fprintf(stderr, "  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9\n");
+    fprintf(stderr, "  -s <int>    random seed, default time(NULL)\n");
+    fprintf(stderr, "  -n <int>    number of steps to run for, default 256. 0 = max_seq_len\n");
+    fprintf(stderr, "  -i <string> input prompt\n");
+    fprintf(stderr, "  -z <string> optional path to custom tokenizer\n");
+    fprintf(stderr, "  -m <string> mode: generate|chat, default: chat\n");
+    fprintf(stderr, "  -y <string> (optional) system prompt in chat mode\n");
+    exit(1);
+}
+
 int main(int argc, char *argv[]) {
     char *checkpoint = NULL; char *tokenizer = "tokenizer.bin";
-    int steps = 512; float temp = 0.8f;
+    int steps = 512; float temp = 0.8f; float topp = 0.9f;
+    char *prompt = NULL; char *mode = "chat"; char *sys_prompt = NULL;
     
     // 1. Generate a hardware-based default seed using QueryPerformanceCounter
     unsigned long long rng_seed = 0;
@@ -743,14 +809,19 @@ int main(int argc, char *argv[]) {
     rng_seed = (unsigned long long)time(NULL);
 #endif
 
-    if (argc >= 2) checkpoint = argv[1]; else { fprintf(stderr, "Usage: run <checkpt>\n"); return 1; }
+    if (argc >= 2) checkpoint = argv[1]; else { error_usage(); }
     
     for (int i = 2; i < argc; i+=2) {
         if (i + 1 >= argc || argv[i][0] != '-') break;
         if (argv[i][1] == 't') temp = atof(argv[i + 1]);
+        else if (argv[i][1] == 'p') topp = atof(argv[i + 1]);
         else if (argv[i][1] == 'n') steps = atoi(argv[i + 1]);
         else if (argv[i][1] == 'z') tokenizer = argv[i + 1];
-        else if (argv[i][1] == 's') rng_seed = (unsigned long long)atol(argv[i + 1]); // 2. Allow override
+        else if (argv[i][1] == 'i') prompt = argv[i + 1];
+        else if (argv[i][1] == 'm') mode = argv[i + 1];
+        else if (argv[i][1] == 'y') sys_prompt = argv[i + 1];
+        else if (argv[i][1] == 's') rng_seed = (unsigned long long)atol(argv[i + 1]);
+        else error_usage();
     }
     
     // 3. IMPORTANT: Seed the standard C RNG because run-smol.c uses rand()
@@ -763,12 +834,16 @@ int main(int argc, char *argv[]) {
     Sampler samp; 
     samp.vocab_size = transformer.config.vocab_size; 
     samp.temperature = temp; 
-    samp.topp = 0.9f; 
+    samp.topp = topp; 
     samp.topk = 40; 
     samp.rng_state = rng_seed; // Set this too, though your current sample() uses rand()
     samp.probindex = malloc(samp.vocab_size*sizeof(ProbIndex));
     
-    chat_loop(&transformer, &tok, &samp, steps, 1);
+    if (strcmp(mode, "generate") == 0) {
+        generate(&transformer, &tok, &samp, prompt, steps);
+    } else {
+        chat_loop(&transformer, &tok, &samp, steps, 1, sys_prompt);
+    }
     
     free(samp.probindex); free_transformer(&transformer);
     return 0;
