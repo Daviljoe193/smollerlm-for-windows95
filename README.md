@@ -5,12 +5,11 @@ Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 
 
 ---
 
-This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for Windows 95. Otherwise...
+This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for Windows 95.
+
+If you don't want to build everything yourself, I have a prebuild in the releases section, [here](https://github.com/Daviljoe193/smollerlm-for-windows95/releases). Otherwise...
 
 ---
-
-If you don't want to build everything yourself, I have a prebuild in the releases section, [here](https://github.com/Daviljoe193/smollerlm-for-windows95/releases).
-
 
 To run it, first you'll need Ubuntu 24.04 LTS or later (Or earlier, I guess? This just what I got.), and to
 
