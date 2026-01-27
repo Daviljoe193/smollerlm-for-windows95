@@ -732,17 +732,41 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
 int main(int argc, char *argv[]) {
     char *checkpoint = NULL; char *tokenizer = "tokenizer.bin";
     int steps = 512; float temp = 0.8f;
+    
+    // 1. Generate a hardware-based default seed using QueryPerformanceCounter
+    unsigned long long rng_seed = 0;
+#if defined _WIN32
+    LARGE_INTEGER qpc;
+    QueryPerformanceCounter(&qpc);
+    rng_seed = (unsigned long long)qpc.QuadPart;
+#else
+    rng_seed = (unsigned long long)time(NULL);
+#endif
+
     if (argc >= 2) checkpoint = argv[1]; else { fprintf(stderr, "Usage: run <checkpt>\n"); return 1; }
+    
     for (int i = 2; i < argc; i+=2) {
         if (i + 1 >= argc || argv[i][0] != '-') break;
         if (argv[i][1] == 't') temp = atof(argv[i + 1]);
         else if (argv[i][1] == 'n') steps = atoi(argv[i + 1]);
         else if (argv[i][1] == 'z') tokenizer = argv[i + 1];
+        else if (argv[i][1] == 's') rng_seed = (unsigned long long)atol(argv[i + 1]); // 2. Allow override
     }
     
+    // 3. IMPORTANT: Seed the standard C RNG because run-smol.c uses rand()
+    srand((unsigned int)rng_seed); 
+
     Transformer transformer; build_transformer(&transformer, checkpoint, steps);
     Tokenizer tok; build_tokenizer(&tok, tokenizer, transformer.config.vocab_size);
-    Sampler samp; samp.vocab_size = transformer.config.vocab_size; samp.temperature = temp; samp.topp = 0.9f; samp.topk = 40; samp.rng_state = 1337; samp.probindex = malloc(samp.vocab_size*sizeof(ProbIndex));
+    
+    // 4. Update the sampler struct (mostly for book-keeping)
+    Sampler samp; 
+    samp.vocab_size = transformer.config.vocab_size; 
+    samp.temperature = temp; 
+    samp.topp = 0.9f; 
+    samp.topk = 40; 
+    samp.rng_state = rng_seed; // Set this too, though your current sample() uses rand()
+    samp.probindex = malloc(samp.vocab_size*sizeof(ProbIndex));
     
     chat_loop(&transformer, &tok, &samp, steps, 1);
     
