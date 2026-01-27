@@ -50,14 +50,16 @@ Now you'll have the model and tokenizer in a llama2.c-ish INT8 format. Next, put
 Finally on Windows 95, you can install `msvcrt.dll` (Yes, you need this), then finally once you have that, you can run your LLM with something like
 
 ```
-run_smol.exe smollerlm2_10m_q80.bin -n 256 -z smoller_tokenizer.bin -m chat
+run_smol.exe smollerlm2_10m_q80.bin -z smoller_tokenizer.bin
 ```
 
 and interact with it more or less like you would in Ollama. It will take several seconds to a minute to load, and doesn't have a proper indicator of if you pressed enter... and also has a broken TUI "scrollbar" that I haven't fixed, requiring you to use PageUp and PageDown to scroll through the chat history. But otherwise, this is a real LLM that can run on really era-inappropriate hardware/software!
 
-Since I ended up losing the CLI flags along the way, they're more or less the same as llama2.c's.
+If run without any flags, it'll print out a help message.
 
 ```
+Usage:   run <checkpoint> [options]
+Example: run model.bin -n 256 -i "Once upon a time"
 Options:
   -t <float>  temperature in [0,inf], default 1.0
   -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9
@@ -65,7 +67,7 @@ Options:
   -n <int>    number of steps to run for, default 256. 0 = max_seq_len
   -i <string> input prompt
   -z <string> optional path to custom tokenizer
-  -m <string> mode: generate|chat, default: generate
+  -m <string> mode: generate|chat, default: chat
   -y <string> (optional) system prompt in chat mode
 ```
 
