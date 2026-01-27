@@ -47,7 +47,7 @@ python export_tokenizer.py --hf mehmetkeremturkcan/SmollerLM2-10M-sftb -o smolle
 
 Now you'll have the model and tokenizer in a llama2.c-ish INT8 format. Next, put the tokenizer, model and executable onto a Windows 95 machine, making sure it has at least 64 megabytes of ram.
 
-Finally on Windows 95, you can run it with something like
+Finally on Windows 95, you can install `msvcrt.dll` (Yes, you need this), then finally once you have that, you can run your LLM with something like
 
 ```
 run_smol.exe smollerlm2_10m_q80.bin -n 256 -z smoller_tokenizer.bin -m chat
