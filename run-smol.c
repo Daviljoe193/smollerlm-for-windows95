@@ -1,6 +1,6 @@
 /* Inference for Llama-2 Transformer model in pure C */
 /* Optimized for Windows 9x (Low RAM) & Pentium 3 (SSE) */
-/* V9.1: Top-Down Terminal, Visual Fixes, Win32 API IO, Generate Mode & Stats */
+/* V9.2: Added 3DNow! support, because AMD got it out before Intel's SSE, and old is gold :3 */
 
 #pragma GCC optimize("fast-math")
 
@@ -17,6 +17,10 @@
 
 #ifdef __SSE__
 #include <xmmintrin.h>
+#endif
+
+#ifdef __3dNOW__
+#include <mm3dnow.h>
 #endif
 
 // ----------------------------------------------------------------------------
@@ -237,6 +241,36 @@ void rmsnorm(float* o, float* x, float* weight, int size) {
     for (; i < size; i++) { ss += x[i] * x[i]; }
     ss /= size; ss += 1e-5f; __m128 ss_v = _mm_load_ss(&ss); ss_v = _mm_rsqrt_ss(ss_v); _mm_store_ss(&ss, ss_v);
     for (int j = 0; j < size; j++) { o[j] = weight[j] * (ss * x[j]); }
+    
+    #elif defined __3dNOW__
+    float ss = 0.0f; 
+    int i = 0; 
+    __m64 sum_v = _m_from_int(0); 
+    // MMX Sum
+    for (; i <= size - 2; i += 2) { 
+        __m64 x_v = *(__m64*)&x[i];       
+        sum_v = _m_pfadd(sum_v, _m_pfmul(x_v, x_v));
+    }
+    sum_v = _m_pfacc(sum_v, sum_v); 
+    float temp_ss; *(__m64*)&temp_ss = sum_v; ss = temp_ss;
+    for (; i < size; i++) { ss += x[i] * x[i]; }
+    
+    _m_femms(); // CRITICAL: Clear MMX state before using FPU sqrtf
+    
+    ss /= size; ss += 1e-5f; ss = 1.0f / sqrtf(ss);
+
+    // Back to MMX for multiplication
+    __m64 ss_v = _m_from_float(ss); 
+    ss_v = _m_punpckldq(ss_v, ss_v); 
+    
+    for (i = 0; i <= size - 2; i += 2) {
+        __m64 w_v = *(__m64*)&weight[i];
+        __m64 x_v = *(__m64*)&x[i];
+        *(__m64*)&o[i] = _m_pfmul(w_v, _m_pfmul(ss_v, x_v));
+    }
+    _m_femms(); // CRITICAL: Clear MMX state before returning
+    for (; i < size; i++) { o[i] = weight[i] * (ss * x[i]); }
+
     #else
     float ss = 0.0f; for (int j = 0; j < size; j++) { ss += x[j] * x[j]; } ss /= size; ss += 1e-5f; ss = 1.0f / sqrtf(ss); for (int j = 0; j < size; j++) { o[j] = weight[j] * (ss * x[j]); }
     #endif
@@ -265,6 +299,35 @@ void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int gro
         }
         xout[i] = temp_sum;
     }
+    #elif defined __3dNOW__
+    // 3DNow! Implementation - FPU SAFE
+    for (int i = 0; i < d; i++) {
+        __m64 row_acc = _m_from_int(0); 
+        int32_t in = i * n; 
+        float* s_ptr = &qt->s[in / group_size]; 
+        int8_t* w_ptr = &qt->q[in];
+
+        for (int j = 0; j < n; j += group_size) {
+            float scale = *s_ptr++;
+            __m64 scale_v = _m_from_float(scale);
+            scale_v = _m_punpckldq(scale_v, scale_v); 
+            
+            // Loop in steps of 2
+            for (int k = 0; k < group_size; k += 2) {
+                int32_t i0 = w_ptr[j+k];
+                int32_t i1 = w_ptr[j+k+1];
+                // Convert Int -> Float using MMX pipe (No FPU usage)
+                __m64 w_v = _m_pi2fd(_mm_set_pi32(i1, i0)); 
+                __m64 x_v = *(__m64*)&x[j+k];
+                // acc += w * scale * x
+                row_acc = _m_pfadd(row_acc, _m_pfmul(x_v, _m_pfmul(w_v, scale_v)));
+            }
+        }
+        row_acc = _m_pfacc(row_acc, row_acc);
+        float res; *(__m64*)&res = row_acc;
+        xout[i] = res;
+    }
+    _m_femms(); // Clear state at end of layer
     #else
     for (int i = 0; i < d; i++) {
         float val = 0.0f; int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
@@ -290,6 +353,10 @@ float* forward(Transformer* t, int token, int pos, int stride_steps) {
         matmul_q8(s->q, s->xb, &w->wq[l], dim, p->n_heads * p->head_size, gs);
         matmul_q8(s->k, s->xb, &w->wk[l], dim, kv_dim, gs);
         matmul_q8(s->v, s->xb, &w->wv[l], dim, kv_dim, gs);
+
+        #ifdef __3dNOW__
+        _m_femms();
+        #endif
 
         for (int i = 0; i < p->n_heads * p->head_size; i+=2) {
             int cidx = pos * (p->head_size / 2) + (i % p->head_size) / 2;
@@ -318,6 +385,11 @@ float* forward(Transformer* t, int token, int pos, int stride_steps) {
         rmsnorm(s->xb, x, w->rms_ffn_weight + l*dim, dim);
         matmul_q8(s->hb, s->xb, &w->w1[l], dim, p->hidden_dim, gs);
         matmul_q8(s->hb2, s->xb, &w->w3[l], dim, p->hidden_dim, gs);
+
+        #ifdef __3dNOW__
+        _m_femms();
+        #endif
+
         for (int i = 0; i < p->hidden_dim; i++) { float val = s->hb[i]; val = val / (1.0f + expf(-val)); s->hb[i] = val * s->hb2[i]; }
         matmul_q8(s->xb, s->hb, &w->w2[l], p->hidden_dim, dim, gs);
         for (int i = 0; i < dim; i++) { x[i] += s->xb[i]; }
