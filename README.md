@@ -32,7 +32,7 @@ i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium3 -mtune=penti
 ...or if you instead want 3DNow! support (Can't leave '90s Team Red high and dry, after all), using
 
 ```
-i686-w64-mingw32-gcc run-smol.c -o run_smol_3dnow.exe -O3 -march=k6-2 -mtune=athlon -m3dnow -fno-math-errno -ffinite-math-only -funsafe-math-optimizations -funroll-loops -static -s -D__3dNOW__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6-2 -mtune=athlon -m3dnow -fno-math-errno -ffinite-math-only -funsafe-math-optimizations -funroll-loops -static -s -D__3dNOW__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
 or without SSE support (Will run on slightly older processors than the Pentium 3 this way), using
