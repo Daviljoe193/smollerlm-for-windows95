@@ -17,7 +17,7 @@ To run it, first you'll need Ubuntu 24.04 LTS or later (Or earlier, I guess? Thi
 git clone https://github.com/Daviljoe193/smollerlm-for-windows95
 ```
 
-and also
+and also for compiling the Windows 95 versions
 
 ```
 sudo apt install mingw-w64
@@ -41,6 +41,12 @@ or without SSE support (Will run on slightly older processors than the Pentium 3
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=i686 -mtune=pentium3 -mfpmath=387 -mno-sse -mno-sse2 -mno-mmx -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
+PowerPC G4 support is experimental (and unimpressive ATM, especially since I'm aiming for Yikes! support), and as of now, I cannot figure out how to cross compile this. On a PowerPC Mac with a G4 or better (Or in a QEMU G4 environment), with Xcode 2.5 installed, run
+
+```
+gcc run-smol.c -o run_smol -O3 -mcpu=7450 -maltivec -mabi=altivec -lm -D__G4__l
+```
+
 Afterwards, you need an LLM and a tokenizer. Currently the scope of this project is so small that it only somewhat supports the SmollerLM family of LLMs by mehmetkeremturkcan on HuggingFace, and no other models currently work. Choose one of his models in that family (I personally went with [this 10 million parameter one](https://huggingface.co/mehmetkeremturkcan/SmollerLM2-10M-sftb), [this 20M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-20M-Instruct-PrunedPostTrained-sft2), [and this 48M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-48M-Instruct-ft-sft)), then...
 
 ```
@@ -61,6 +67,12 @@ Finally on Windows 95, you can install `msvcrt.dll` (Yes, you need this), then f
 
 ```
 run_smol.exe smollerlm2_10m_q80.bin -z smoller_tokenizer.bin
+```
+
+Or on PPC Mac OS X with
+
+```
+./run_smol smollerlm2_10m_q80.bin -z smoller_tokenizer.bin
 ```
 
 and interact with it more or less like you would in Ollama. It will take several seconds to a minute to load, and doesn't have a proper indicator of if you pressed enter... and also has a broken TUI "scrollbar" that I haven't fixed, requiring you to use PageUp and PageDown to scroll through the chat history. But otherwise, this is a real LLM that can run on really era-inappropriate hardware/software!
