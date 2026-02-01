@@ -1,5 +1,5 @@
 # smollerlm-for-windows95
-Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets).
+Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower).
 
 ![](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/main/llamac-smol-ghdemo.avif)
 
@@ -35,10 +35,34 @@ i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium3 -mtune=penti
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6-2 -mtune=athlon -m3dnow -fno-math-errno -ffinite-math-only -funsafe-math-optimizations -funroll-loops -static -s -D__3dNOW__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
-or without SSE support (Will run on slightly older processors than the Pentium 3 this way), using
+Or for slightly older Team Red, on the original K6 (using MMX)
 
 ```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=i686 -mtune=pentium3 -mfpmath=387 -mno-sse -mno-sse2 -mno-mmx -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6 -mtune=k6 -mmmx -mno-3dnow -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+```
+
+...or for Pentium II with MMX...
+
+```
+i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium2 -mtune=pentium2 -mmmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+```
+
+...or Pentium MMX...
+
+```
+i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium-mmx -mtune=pentium-mmx -mmmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+```
+
+...or for Intel 486DX (Scalar only, for masochists)
+
+```
+i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=i486 -mtune=i486 -mno-mmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+```
+
+...or for Pentium (Scalar only, for masochists with standards)
+
+```
+i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium -mtune=pentium -mno-mmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
 PowerPC G4 support is experimental (and unimpressive ATM, especially since I'm aiming for Yikes! support), and as of now, I cannot figure out how to cross compile this. On a PowerPC Mac with a G4 or better (Or in a QEMU G4 environment), with Xcode 2.5 installed, run
