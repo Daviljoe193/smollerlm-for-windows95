@@ -59,7 +59,7 @@ i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium-mmx -mtune=pe
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=i486 -mtune=i486 -mno-mmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
-...or for Pentium (Scalar only, for masochists with standards)
+...or for Pentium (Scalar only, for masochists with standards) **ALSO CURRENTLY BROKEN, WILL FIX**
 
 ```
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium -mtune=pentium -mno-mmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
