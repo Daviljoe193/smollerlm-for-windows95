@@ -29,7 +29,7 @@ Then compile it with SSE support (For Windows 9x, I'd recommend [JHRobotics/simd
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium3 -mtune=pentium3 -mfpmath=sse -msse -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
-...or if you instead want 3DNow! support (Can't leave '90s Team Red high and dry, after all), using
+...or if you instead want 3DNow! support (Can't leave '90s Team Red high and dry, after all), using **GARBAGE MODEL OUTPUT, WILL FIX**
 
 ```
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6-2 -mtune=athlon -m3dnow -fno-math-errno -ffinite-math-only -funsafe-math-optimizations -funroll-loops -static -s -D__3dNOW__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
