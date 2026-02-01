@@ -1,10 +1,10 @@
 /* 
    Run-Smol Unified: LLM Inference for Legacy Hardware
    Supports: 
-   1. Windows 95/98/XP on x86 (Scalar, SSE, 3DNow!)
+   1. Windows 95/98/XP on x86 (Scalar, MMX, SSE, 3DNow!)
    2. Mac OS X 10.4 on PowerPC G4 (AltiVec)
    
-   Merged Version 11.4 - The "Command & Control" Update
+   Merged Version 12.0 - The "Pentium II" Update
 */
 
 #pragma GCC optimize("fast-math")
@@ -27,6 +27,7 @@
     typedef unsigned int uint32_t;
     typedef signed __int64 int64_t;
     typedef unsigned __int64 uint64_t;
+    typedef short int16_t;
 #else
     #include <stdint.h>
 #endif
@@ -56,6 +57,11 @@
     #include <mm3dnow.h>
 #endif
 
+/* MMX Support (Pentium MMX / Pentium II) */
+#if defined(__MMX__)
+    #include <mmintrin.h>
+#endif
+
 /* AltiVec / G4 Support */
 #if defined(__ALTIVEC__)
     #include <altivec.h>
@@ -65,7 +71,6 @@
         #undef pixel
     #endif
     
-    /* GCC 4.0.1 Polyfill for vec_splats */
     static inline vector float vec_splats_poly(float x) {
         union { float f[4]; vector float v; } u;
         u.f[0] = x; u.f[1] = x; u.f[2] = x; u.f[3] = x;
@@ -73,7 +78,6 @@
     }
     #define vec_splats vec_splats_poly
 
-    /* Unaligned load helper for G4 */
     static inline vector unsigned char vec_load_unaligned(unsigned char* ptr) {
         vector unsigned char v1 = vec_ld(0, ptr);
         vector unsigned char v2 = vec_ld(16, ptr);
@@ -117,7 +121,7 @@ static inline float bswap_float(float x) {
     #define COL_BG          0 
     #define COL_TEXT        (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE) 
     #define COL_PROMPT      (FOREGROUND_GREEN | FOREGROUND_INTENSITY) 
-    #define COL_PLACEHOLDER (FOREGROUND_INTENSITY) /* Dark Gray */
+    #define COL_PLACEHOLDER (FOREGROUND_INTENSITY) 
     #define COL_INFO        (FOREGROUND_BLUE | FOREGROUND_INTENSITY) 
     #define COL_BAR         (BACKGROUND_RED | BACKGROUND_GREEN | BACKGROUND_BLUE) 
 #else
@@ -127,9 +131,8 @@ static inline float bswap_float(float x) {
     #include <sys/stat.h>
     #include <termios.h> 
 
-    /* ANSI Colors for POSIX */
     #define ANSI_COLOR_GREEN   "\x1b[1;32m"
-    #define ANSI_COLOR_GRAY    "\x1b[90m" /* High Intensity Black (Dark Gray) */
+    #define ANSI_COLOR_GRAY    "\x1b[90m" 
     #define ANSI_COLOR_BLUE    "\x1b[1;34m"
     #define ANSI_COLOR_RESET   "\x1b[0m"
     #define ANSI_CLEAR_SCREEN  "\033[2J\033[H"
@@ -492,21 +495,7 @@ void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int gro
         }
         return;
     }
-    #elif defined(__3dNOW__)
-    for (int i = 0; i < d; i++) {
-        __m64 row_acc = _m_from_int(0); int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
-        for (int j = 0; j < n; j += group_size) {
-            float scale = *s_ptr++; __m64 scale_v = _m_from_float(scale); scale_v = _m_punpckldq(scale_v, scale_v); 
-            for (int k = 0; k < group_size; k += 2) {
-                int32_t i0 = w_ptr[j+k]; int32_t i1 = w_ptr[j+k+1];
-                __m64 w_v = _m_pi2fd(_mm_set_pi32(i1, i0)); __m64 x_v = *(__m64*)&x[j+k];
-                row_acc = _m_pfadd(row_acc, _m_pfmul(x_v, _m_pfmul(w_v, scale_v)));
-            }
-        }
-        row_acc = _m_pfacc(row_acc, row_acc); float res; *(__m64*)&res = row_acc; xout[i] = res;
-    }
-    _m_femms();
-    
+
     #elif defined(__SSE__)
     for (int i = 0; i < d; i++) {
         int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
@@ -522,6 +511,114 @@ void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int gro
             for (; k < group_size; k++) temp_sum += ((float)w_ptr[j+k] * scale) * x[j+k];
         }
         xout[i] = temp_sum;
+    }
+    return;
+
+    #elif defined(__3dNOW__)
+    for (int i = 0; i < d; i++) {
+        __m64 row_acc = _m_from_int(0); int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
+        for (int j = 0; j < n; j += group_size) {
+            float scale = *s_ptr++; __m64 scale_v = _m_from_float(scale); scale_v = _m_punpckldq(scale_v, scale_v); 
+            for (int k = 0; k < group_size; k += 2) {
+                int32_t i0 = w_ptr[j+k]; int32_t i1 = w_ptr[j+k+1];
+                __m64 w_v = _m_pi2fd(_mm_set_pi32(i1, i0)); __m64 x_v = *(__m64*)&x[j+k];
+                row_acc = _m_pfadd(row_acc, _m_pfmul(x_v, _m_pfmul(w_v, scale_v)));
+            }
+        }
+        row_acc = _m_pfacc(row_acc, row_acc); float res; *(__m64*)&res = row_acc; xout[i] = res;
+    }
+    _m_femms();
+    return;
+
+    #elif defined(__MMX__)
+    /* 
+       Dynamic Fixed-Point Quantization for MMX - High Precision
+       Quantizes float inputs (x) to full-range int16 to minimize divergence from FPU output.
+    */
+    {
+        int16_t x_quant[4096]; 
+        float x_scales[512];   
+        int32_t blk_sums[512]; 
+        int j, k;
+
+        // 1. FPU Phase: Pre-quantize input
+        // Optimization: Use ~15-bit range (32000) instead of 7-bit (127) for much higher precision.
+        for(j = 0; j < n; j += group_size) {
+            float max_val = 1e-9f; // Prevent divide-by-zero
+            int blk_limit = (j + group_size > n) ? n - j : group_size;
+            
+            // Find max absolute value in block
+            for(k = 0; k < blk_limit; k++) {
+                float v = x[j+k]; if(v < 0) v = -v; 
+                if(v > max_val) max_val = v;
+            }
+            
+            // Use 32000 to leave headroom for rounding overshoot
+            float scale = 32000.0f / max_val; 
+            float inv_scale = max_val / 32000.0f;
+            
+            x_scales[j / group_size] = inv_scale;
+
+            for(k = 0; k < blk_limit; k++) {
+                // Rounding (v + 0.5) is critical for accuracy vs simple truncation
+                float val = x[j+k] * scale;
+                x_quant[j+k] = (int16_t)(val + (val >= 0.0f ? 0.5f : -0.5f));
+            }
+        }
+
+        // 2. Row Loop
+        for (int i = 0; i < d; i++) {
+            int32_t in = i * n;
+            int8_t* w_row_start = &qt->q[in];
+            int blk_idx = 0;
+
+            // MMX Phase: Integer Dot Products
+            for (j = 0; j < n; j += group_size) {
+                int8_t* w_ptr = w_row_start + j;
+                int blk_limit = (j + group_size > n) ? n - j : group_size;
+                
+                __m64 sum_v = _mm_setzero_si64();
+                __m64 zero_v = _mm_setzero_si64();
+
+                for (k = 0; k <= blk_limit - 4; k += 4) {
+                    // Load weights (32-bit), unpack to 16-bit
+                    int32_t w_raw = *(int32_t*)&w_ptr[k];
+                    __m64 w_v = _mm_cvtsi32_si64(w_raw);
+                    __m64 mask = _mm_cmpgt_pi8(zero_v, w_v);
+                    __m64 w_16 = _mm_unpacklo_pi8(w_v, mask); 
+                    
+                    // Load input (64-bit, 4x int16)
+                    __m64 x_v = *(__m64*)&x_quant[j+k];
+
+                    // Multiply-Add: 16-bit * 16-bit -> 32-bit accumulation
+                    sum_v = _mm_add_pi32(sum_v, _mm_madd_pi16(w_16, x_v));
+                }
+
+                // Horizontal sum
+                __m64 high = _mm_srli_si64(sum_v, 32);
+                sum_v = _mm_add_pi32(sum_v, high);
+                int32_t blk_sum = _mm_cvtsi64_si32(sum_v);
+
+                // Scalar cleanup
+                for (; k < blk_limit; k++) {
+                    blk_sum += (int32_t)w_ptr[k] * (int32_t)x_quant[j+k];
+                }
+                
+                blk_sums[blk_idx++] = blk_sum;
+            }
+
+            // Clear MMX state before FPU operations
+            _mm_empty();
+
+            // FPU Phase: Accumulate with scales
+            float val = 0.0f;
+            float* s_ptr = &qt->s[in / group_size];
+            for (int b = 0; b < blk_idx; b++) {
+                 // Reconstruct: sum * weight_scale * activation_scale
+                 val += (float)blk_sums[b] * s_ptr[b] * x_scales[b];
+            }
+            xout[i] = val;
+        }
     }
     return;
     #endif
