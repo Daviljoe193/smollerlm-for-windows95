@@ -35,7 +35,7 @@ i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium3 -mtune=penti
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6-2 -mtune=athlon -m3dnow -fno-math-errno -ffinite-math-only -funsafe-math-optimizations -funroll-loops -static -s -D__3dNOW__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
 ```
 
-Or for slightly older Team Red, on the original K6 (using MMX)
+Or for slightly older Team Red, on the original K6 (using MMX) **CURRENTLY BROKEN, WILL FIX**
 
 ```
 i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6 -mtune=k6 -mmmx -mno-3dnow -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
