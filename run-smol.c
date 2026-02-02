@@ -1,10 +1,6 @@
 /* 
-   Run-Smol Unified: LLM Inference for Legacy Hardware
-   Supports: 
-   1. Windows 95/98/XP on x86 (Scalar, MMX, SSE, 3DNow!)
-   2. Mac OS X 10.4 on PowerPC G4 (AltiVec)
-   
-   Merged Version 12.0 - The "Pentium II" Update
+   Run-Smol Unified: Legacy Hardware Edition
+   Targeting: Windows 95/98/NT4/XP on Pentium I/MMX, K6-2/3, Athlon, P2/P3
 */
 
 #pragma GCC optimize("fast-math")
@@ -13,81 +9,94 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <time.h>
-#include <math.h>
 #include <string.h>
 #include <fcntl.h>
 #include <stdarg.h>
 #include <signal.h>
+#include <math.h>
 
-/* Handle stdint.h availability for legacy compilers (MSVC 6.0) */
-#if defined(_MSC_VER) && (_MSC_VER < 1600)
+/* ---------------------------------------------------------------------------- */
+/* COMPILER COMPATIBILITY & TYPE DEFINITIONS */
+/* ---------------------------------------------------------------------------- */
+
+/* Watcom C Specifics */
+#if defined(__WATCOMC__)
+    #define inline __inline
+    typedef __int64 int64_t;
+    typedef unsigned __int64 uint64_t;
     typedef signed char int8_t;
     typedef unsigned char uint8_t;
     typedef signed int int32_t;
     typedef unsigned int uint32_t;
-    typedef signed __int64 int64_t;
-    typedef unsigned __int64 uint64_t;
     typedef short int16_t;
-#else
-    #include <stdint.h>
-#endif
-
-/* ---------------------------------------------------------------------------- */
-/* COMPILER COMPATIBILITY & INTRINSICS */
-/* ---------------------------------------------------------------------------- */
-
-/* C89 Compatibility for 'inline' */
-#ifndef __cplusplus
-    #ifdef __GNUC__
-        #define inline __inline__
-    #elif defined(_MSC_VER)
-        #define inline __inline
-    #else
-        #define inline
-    #endif
-#endif
-
-/* SSE Support */
-#if defined(__SSE__)
-    #include <xmmintrin.h>
-#endif
-
-/* 3DNow! Support */
-#if defined(__3dNOW__)
-    #include <mm3dnow.h>
-#endif
-
-/* MMX Support (Pentium MMX / Pentium II) */
-#if defined(__MMX__)
-    #include <mmintrin.h>
-#endif
-
-/* AltiVec / G4 Support */
-#if defined(__ALTIVEC__)
-    #include <altivec.h>
-    #if !defined(__APPLE__)
-        #undef bool
-        #undef vector
-        #undef pixel
-    #endif
     
-    static inline vector float vec_splats_poly(float x) {
-        union { float f[4]; vector float v; } u;
-        u.f[0] = x; u.f[1] = x; u.f[2] = x; u.f[3] = x;
-        return u.v;
-    }
-    #define vec_splats vec_splats_poly
+    /* Missing types */
+    typedef unsigned int uintptr_t;
+    typedef int intptr_t;
+    
+    /* Map C99 float math to C89 double math */
+    #define powf(x,y) ((float)pow((double)(x),(double)(y)))
+    #define sqrtf(x) ((float)sqrt((double)(x)))
+    #define sinf(x) ((float)sin((double)(x)))
+    #define cosf(x) ((float)cos((double)(x)))
+    #define expf(x) ((float)exp((double)(x)))
 
-    static inline vector unsigned char vec_load_unaligned(unsigned char* ptr) {
-        vector unsigned char v1 = vec_ld(0, ptr);
-        vector unsigned char v2 = vec_ld(16, ptr);
-        vector unsigned char mask = vec_lvsl(0, ptr);
-        return vec_perm(v1, v2, mask);
-    }
+    /* Allow standard IO names */
+    #pragma warning 131 9
+    
+#else
+    /* Modern Compiler / MSSVC */
+    #include <stdint.h>
+    
+    #ifndef __cplusplus
+        #ifdef __GNUC__
+            #define inline __inline__
+        #elif defined(_MSC_VER)
+            #define inline __inline
+        #else
+            #define inline
+        #endif
+    #endif
 #endif
 
 /* ---------------------------------------------------------------------------- */
-/* ENDIANNESS CONTROL */
+/* INTRINSICS (GCC/MSVC Only - Watcom uses ASM blocks) */
+/* ---------------------------------------------------------------------------- */
+
+#if !defined(__WATCOMC__)
+    #if defined(__SSE__)
+        #include <xmmintrin.h>
+    #endif
+    #if defined(__3dNOW__)
+        #include <mm3dnow.h>
+    #endif
+    #if defined(__MMX__)
+        #include <mmintrin.h>
+    #endif
+    #if defined(__ALTIVEC__)
+        #include <altivec.h>
+        #if !defined(__APPLE__)
+            #undef bool
+            #undef vector
+            #undef pixel
+        #endif
+        static inline vector float vec_splats_poly(float x) {
+            union { float f[4]; vector float v; } u;
+            u.f[0] = x; u.f[1] = x; u.f[2] = x; u.f[3] = x;
+            return u.v;
+        }
+        #define vec_splats vec_splats_poly
+        static inline vector unsigned char vec_load_unaligned(unsigned char* ptr) {
+            vector unsigned char v1 = vec_ld(0, ptr);
+            vector unsigned char v2 = vec_ld(16, ptr);
+            vector unsigned char mask = vec_lvsl(0, ptr);
+            return vec_perm(v1, v2, mask);
+        }
+    #endif
+#endif
+
+/* ---------------------------------------------------------------------------- */
+/* ENDIANNESS */
 /* ---------------------------------------------------------------------------- */
 #if defined(__G4__) || defined(__ppc__) || defined(__BIG_ENDIAN__)
     #define NEEDS_BSWAP 1
@@ -106,7 +115,7 @@ static inline float bswap_float(float x) {
 }
 
 /* ---------------------------------------------------------------------------- */
-/* PLATFORM INCLUDES & DEFINES */
+/* PLATFORM INCLUDES */
 /* ---------------------------------------------------------------------------- */
 
 #if defined _WIN32
@@ -115,9 +124,10 @@ static inline float bswap_float(float x) {
     #endif
     #include <windows.h>
     #include <conio.h>
+    #if !defined(__WATCOMC__)
     #include <io.h>
+    #endif
 
-    /* Win32 Colors */
     #define COL_BG          0 
     #define COL_TEXT        (FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE) 
     #define COL_PROMPT      (FOREGROUND_GREEN | FOREGROUND_INTENSITY) 
@@ -148,9 +158,11 @@ volatile int stop_generation = 0;
 /* MEMORY ALLOCATOR */
 /* ---------------------------------------------------------------------------- */
 void* malloc_aligned(size_t size) {
+    /* 16-byte alignment is sufficient for SSE/3DNow */
     void* ptr = malloc(size + 16);
     void* aligned;
     if (!ptr) return NULL;
+    /* Use explicit cast to avoid void pointer math warnings in C89 */
     aligned = (void*)(((uintptr_t)ptr + 15) & ~0x0F);
     if (aligned == ptr) aligned = (void*)((uintptr_t)ptr + 16);
     *((void**)aligned - 1) = ptr;
@@ -173,14 +185,14 @@ void free_aligned(void* ptr) {
 /* ---------------------------------------------------------------------------- */
 
 #if defined _WIN32
-    static inline int clock_gettime_impl(int clk_id, struct timespec *tp) {
+    static inline int clock_gettime_impl(long* sec, long* nsec) {
         LARGE_INTEGER freq, count;
         if (QueryPerformanceFrequency(&freq)) {
             QueryPerformanceCounter(&count);
-            tp->tv_sec = count.QuadPart / freq.QuadPart;
-            tp->tv_nsec = (long)((count.QuadPart % freq.QuadPart) * 1000000000 / freq.QuadPart);
+            *sec = (long)(count.QuadPart / freq.QuadPart);
+            *nsec = (long)((count.QuadPart % freq.QuadPart) * 1000000000 / freq.QuadPart);
         } else {
-            tp->tv_sec = time(NULL); tp->tv_nsec = 0;
+            *sec = (long)time(NULL); *nsec = 0;
         }
         return 0;
     }
@@ -189,23 +201,20 @@ void free_aligned(void* ptr) {
         return FALSE;
     }
 #else
-    #ifdef __APPLE__
-    static inline int clock_gettime_impl(int clk_id, struct timespec *tp) {
+    static inline int clock_gettime_impl(long* sec, long* nsec) {
         struct timeval tv;
         gettimeofday(&tv, NULL);
-        tp->tv_sec = tv.tv_sec;
-        tp->tv_nsec = tv.tv_usec * 1000;
+        *sec = tv.tv_sec;
+        *nsec = tv.tv_usec * 1000;
         return 0;
     }
-    #else
-    static inline int clock_gettime_impl(int clk_id, struct timespec *tp) { return clock_gettime(clk_id, tp); }
-    #endif
     void handle_sigint(int sig) { stop_generation = 1; }
 #endif
 
 long time_in_ms() {
-    struct timespec time; clock_gettime_impl(0, &time);
-    return time.tv_sec * 1000 + time.tv_nsec / 1000000;
+    long s, ns;
+    clock_gettime_impl(&s, &ns);
+    return s * 1000 + ns / 1000000;
 }
 
 /* ---------------------------------------------------------------------------- */
@@ -271,7 +280,9 @@ void malloc_run_state(RunState* s, Config* p, int alloc_steps) {
 }
 
 void init_quantized_tensor(QuantizedTensor* t, char** ptr_ref, int numel, int group_size) {
-    char* ptr = *ptr_ref; t->q = (int8_t*)ptr; ptr += numel * sizeof(int8_t);
+    char* ptr = *ptr_ref; 
+    t->q = (int8_t*)ptr; 
+    ptr += numel * sizeof(int8_t);
     t->s = (float*)ptr; 
     #if defined(NEEDS_BSWAP)
     {
@@ -326,21 +337,31 @@ void load_weights(Transformer* t, int shared_weights) {
 }
 
 void build_transformer(Transformer *t, char* checkpoint_path, int steps) {
-    FILE *file = fopen(checkpoint_path, "rb"); if (!file) { fprintf(stderr, "File not found: %s\n", checkpoint_path); exit(1); }
-    uint32_t magic; fread(&magic, sizeof(uint32_t), 1, file);
-    int version; fread(&version, sizeof(int), 1, file);
+    /* C89 Strict: Declarations MUST be at top */
+    FILE *file;
+    uint32_t magic;
+    int version;
+    uint8_t shared;
+    #if defined(NEEDS_BSWAP)
+    int *pConf;
+    int i; 
+    #endif
+    
+    file = fopen(checkpoint_path, "rb"); 
+    if (!file) { fprintf(stderr, "File not found: %s\n", checkpoint_path); exit(1); }
+    
+    fread(&magic, sizeof(uint32_t), 1, file);
+    fread(&version, sizeof(int), 1, file);
     
     fread(&t->config, sizeof(int) * 8, 1, file);
     #if defined(NEEDS_BSWAP)
-    {
-        int *pConf = (int*)&t->config;
-        int i; for(i=0; i<8; i++) pConf[i] = bswap32(pConf[i]);
-    }
+    pConf = (int*)&t->config;
+    for(i=0; i<8; i++) pConf[i] = bswap32(pConf[i]);
     #endif
 
     if (t->config.head_size == 0) t->config.head_size = t->config.dim / t->config.n_heads;
 
-    uint8_t shared; fread(&shared, sizeof(uint8_t), 1, file);
+    fread(&shared, sizeof(uint8_t), 1, file);
     fread(&t->group_size, sizeof(int), 1, file); 
     
     #if defined(NEEDS_BSWAP)
@@ -393,67 +414,107 @@ void free_transformer(Transformer* t) {
 }
 
 /* ---------------------------------------------------------------------------- */
-/* MATH KERNELS */
+/* MATH KERNELS (WATCOM ASM + GCC INTRINSICS) */
 /* ---------------------------------------------------------------------------- */
 
 void rmsnorm(float* o, float* x, float* weight, int size) {
-    #if defined(__ALTIVEC__)
-        float ss = 0.0f; int i = 0;
-        vector float sum_v = vec_splats(0.0f);
-        vector float zero_v = vec_splats(0.0f);
-        for (; i <= size - 4; i += 4) {
-            vector float xv = vec_ld(0, &x[i]);
-            sum_v = vec_madd(xv, xv, sum_v);
-        }
-        {
-            float temp[4] __attribute__((aligned(16)));
-            union { vector float v; float f[4]; } u;
-            vec_ste(sum_v, 0, temp); vec_ste(sum_v, 4, &temp[1]);
-            vec_ste(sum_v, 8, &temp[2]); vec_ste(sum_v, 12, &temp[3]);
-            u.v = sum_v; ss = u.f[0] + u.f[1] + u.f[2] + u.f[3];
-        }
-        for (; i < size; i++) { ss += x[i] * x[i]; }
-        ss /= size; ss += 1e-5f; ss = 1.0f / sqrtf(ss);
-        {
-            vector float ss_v = vec_splats(ss);
-            i = 0;
-            for (; i <= size - 4; i += 4) {
-                vector float xv = vec_ld(0, &x[i]);
-                vector unsigned char w_raw = vec_load_unaligned((unsigned char*)&weight[i]);
-                vector float wv = (vector float)w_raw;
-                vector float res = vec_madd(wv, vec_madd(xv, ss_v, zero_v), zero_v);
-                vec_st(res, 0, &o[i]);
-            }
-        }
-        for (; i < size; i++) { o[i] = weight[i] * (ss * x[i]); }
-    
-    #elif defined(__3dNOW__)
-        float ss = 0.0f; int i = 0; 
-        __m64 sum_v = _m_from_int(0); 
-        for (; i <= size - 2; i += 2) { 
-            __m64 x_v = *(__m64*)&x[i];       
-            sum_v = _m_pfadd(sum_v, _m_pfmul(x_v, x_v));
-        }
-        sum_v = _m_pfacc(sum_v, sum_v); float temp_ss; *(__m64*)&temp_ss = sum_v; ss = temp_ss; _m_femms();
-        for (; i < size; i++) { ss += x[i] * x[i]; }
-        ss /= size; ss += 1e-5f; ss = 1.0f / sqrtf(ss);
-        __m64 ss_v = _m_from_float(ss); ss_v = _m_punpckldq(ss_v, ss_v); 
-        for (i = 0; i <= size - 2; i += 2) {
-            __m64 w_v = *(__m64*)&weight[i]; __m64 x_v = *(__m64*)&x[i];
-            *(__m64*)&o[i] = _m_pfmul(w_v, _m_pfmul(ss_v, x_v));
-        }
-        _m_femms(); for (; i < size; i++) { o[i] = weight[i] * (ss * x[i]); }
+    int i;
+    float ss = 0.0f;
 
-    #elif defined(__SSE__)
-        float ss = 0.0f; int i = 0; __m128 sum_v = _mm_setzero_ps();
-        for (; i <= size - 4; i += 4) { __m128 x_v = _mm_load_ps(&x[i]); sum_v = _mm_add_ps(sum_v, _mm_mul_ps(x_v, x_v)); }
-        float temp[4]; _mm_storeu_ps(temp, sum_v); ss = temp[0] + temp[1] + temp[2] + temp[3];
-        for (; i < size; i++) { ss += x[i] * x[i]; }
-        ss /= size; ss += 1e-5f; __m128 ss_v = _mm_load_ss(&ss); ss_v = _mm_rsqrt_ss(ss_v); _mm_store_ss(&ss, ss_v);
-        for (int j = 0; j < size; j++) { o[j] = weight[j] * (ss * x[j]); }
-    #else
-        float ss = 0.0f; int j; for (j = 0; j < size; j++) { ss += x[j] * x[j]; } ss /= size; ss += 1e-5f; ss = 1.0f / sqrtf(ss); for (j = 0; j < size; j++) { o[j] = weight[j] * (ss * x[j]); }
-    #endif
+#if defined(__WATCOMC__) && defined(__3DNOW__)
+    /* 3DNow! Implementation for K6-2 */
+    float temp_ss = 0.0f;
+    _asm {
+        mov         eax, x
+        mov         ecx, size
+        pxor        mm0, mm0
+        shr         ecx, 1
+        cmp         ecx, 0
+        jle         done_sq
+    loop_sq:
+        movq        mm1, [eax]
+        pfmul       mm1, mm1
+        pfadd       mm0, mm1
+        add         eax, 8
+        dec         ecx
+        jnz         loop_sq
+        // Hsum
+        movq        mm1, mm0
+        psrlq       mm1, 32
+        pfadd       mm0, mm1
+        movd        temp_ss, mm0
+        femms
+    done_sq:
+    }
+    ss = temp_ss;
+    /* Handle odd size scalar fallback if needed (LLM usually even dim) */
+#elif defined(__ALTIVEC__)
+    vector float sum_v = vec_splats(0.0f);
+    for (i = 0; i <= size - 4; i += 4) {
+        vector float xv = vec_ld(0, &x[i]);
+        sum_v = vec_madd(xv, xv, sum_v);
+    }
+    {
+        float temp[4] __attribute__((aligned(16)));
+        union { vector float v; float f[4]; } u;
+        vec_ste(sum_v, 0, temp); vec_ste(sum_v, 4, &temp[1]);
+        vec_ste(sum_v, 8, &temp[2]); vec_ste(sum_v, 12, &temp[3]);
+        u.v = sum_v; ss = u.f[0] + u.f[1] + u.f[2] + u.f[3];
+    }
+#elif defined(__SSE__)
+    __m128 sum_v = _mm_setzero_ps();
+    for (i = 0; i <= size - 4; i += 4) { __m128 x_v = _mm_load_ps(&x[i]); sum_v = _mm_add_ps(sum_v, _mm_mul_ps(x_v, x_v)); }
+    float temp[4]; _mm_storeu_ps(temp, sum_v); ss = temp[0] + temp[1] + temp[2] + temp[3];
+#else
+    /* Scalar / Watcom MMX Fallback */
+    for (i = 0; i < size; i++) { ss += x[i] * x[i]; }
+#endif
+
+    ss /= size; ss += 1e-5f; ss = 1.0f / sqrtf(ss);
+
+#if defined(__WATCOMC__) && defined(__3DNOW__)
+    _asm {
+        movd        mm2, ss
+        punpckldq   mm2, mm2
+        mov         eax, x
+        mov         ebx, o
+        mov         edx, weight
+        mov         ecx, size
+        shr         ecx, 1
+    loop_norm:
+        movq        mm0, [eax]
+        movq        mm1, [edx]
+        pfmul       mm0, mm2
+        pfmul       mm0, mm1
+        movq        [ebx], mm0
+        add         eax, 8
+        add         ebx, 8
+        add         edx, 8
+        dec         ecx
+        jnz         loop_norm
+        femms
+    }
+#elif defined(__ALTIVEC__)
+    {
+        vector float ss_v = vec_splats(ss);
+        vector float zero_v = vec_splats(0.0f);
+        for (i = 0; i <= size - 4; i += 4) {
+            vector float xv = vec_ld(0, &x[i]);
+            vector unsigned char w_raw = vec_load_unaligned((unsigned char*)&weight[i]);
+            vector float wv = (vector float)w_raw;
+            vector float res = vec_madd(wv, vec_madd(xv, ss_v, zero_v), zero_v);
+            vec_st(res, 0, &o[i]);
+        }
+    }
+#elif defined(__SSE__)
+    __m128 ss_v = _mm_load_ss(&ss); ss_v = _mm_shuffle_ps(ss_v, ss_v, 0);
+    for (int j = 0; j < size; j+=4) { 
+        __m128 val = _mm_mul_ps(_mm_mul_ps(_mm_load_ps(&x[j]), ss_v), _mm_load_ps(&weight[j]));
+        _mm_store_ps(&o[j], val);
+    }
+#else
+    for (i = 0; i < size; i++) { o[i] = weight[i] * (ss * x[i]); }
+#endif
 }
 
 void softmax(float* x, int size) {
@@ -464,9 +525,96 @@ void softmax(float* x, int size) {
 }
 
 void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int group_size) {
-    #if defined(__ALTIVEC__)
+    int i;
+#if defined(__WATCOMC__) && defined(__3DNOW__)
+    /* Watcom 3DNow! Implementation - K6-2 Optimized */
+    for (i = 0; i < d; i++) {
+        float val = 0.0f;
+        int32_t in = i * n;
+        int div_gs = group_size;
+        int gs_step = group_size;
+        float* s_start = &qt->s[in / div_gs];
+        int8_t* q_start = &qt->q[in];
+        float row_sum = 0.0f;
+        int j;
+        
+        for (j = 0; j < n; j += div_gs) {
+            float scale = *s_start++;
+            float blk_sum = 0.0f;
+            float* cur_x = &x[j];
+            int8_t* cur_w = &q_start[j];
+            
+            _asm {
+                mov         eax, cur_x
+                mov         ebx, cur_w
+                mov         ecx, div_gs
+                shr         ecx, 1
+                pxor        mm0, mm0
+            mm_loop:
+                movq        mm1, [eax]
+                // Load 2 chars
+                movzx       edx, byte ptr [ebx]
+                movzx       edi, byte ptr [ebx+1]
+                
+                // Sign extend manually (replacing bad cmps of dil)
+                // EDX (w0) 0..255 -> -128..127
+                cmp         edx, 0x80
+                jb          skip_1
+                or          edx, 0xFFFFFF00
+            skip_1:
+                // EDI (w1) 0..255 -> -128..127
+                cmp         edi, 0x80
+                jb          skip_2
+                or          edi, 0xFFFFFF00
+            skip_2:
+
+                movd        mm2, edx
+                movd        mm3, edi
+                punpckldq   mm2, mm3
+                pi2fd       mm2, mm2
+                pfmul       mm1, mm2
+                pfadd       mm0, mm1
+                add         eax, 8
+                add         ebx, 2
+                dec         ecx
+                jnz         mm_loop
+                
+                movq        mm1, mm0
+                psrlq       mm1, 32
+                pfadd       mm0, mm1
+                movd        blk_sum, mm0
+                femms
+            }
+            row_sum += blk_sum * scale;
+        }
+        xout[i] = row_sum;
+    }
+#elif defined(__WATCOMC__)
+    /* Watcom Scalar / MMX Fallback (Unrolled for P5/MMX pipe) */
+    for (i = 0; i < d; i++) {
+        float val = 0.0f; 
+        int32_t in = i * n; 
+        float* s_ptr = &qt->s[in / group_size]; 
+        int8_t* w_ptr = &qt->q[in];
+        int j;
+        for (j = 0; j < n; j += group_size) {
+            float scale = *s_ptr++;
+            float temp = 0.0f;
+            int k;
+            /* Simple unroll is often faster than broken intrinsics on P5 */
+            for (k = 0; k < group_size; k+=4) {
+               temp += ((float)w_ptr[j+k] * x[j+k]);
+               temp += ((float)w_ptr[j+k+1] * x[j+k+1]);
+               temp += ((float)w_ptr[j+k+2] * x[j+k+2]);
+               temp += ((float)w_ptr[j+k+3] * x[j+k+3]);
+            }
+            val += temp * scale;
+        }
+        xout[i] = val;
+    }
+#elif defined(__ALTIVEC__)
+    /* Keep your existing Altivec code here */
     if (group_size % 4 == 0 && group_size >= 16) {
-        int i; 
         vector float zero_v = vec_splats(0.0f);
         for (i = 0; i < d; i++) {
             int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
@@ -493,11 +641,10 @@ void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int gro
             }
             { union { vector float v; float f[4]; } u; u.v = v_sum; xout[i] = u.f[0] + u.f[1] + u.f[2] + u.f[3]; }
         }
-        return;
     }
-
-    #elif defined(__SSE__)
-    for (int i = 0; i < d; i++) {
+#elif defined(__SSE__)
+    /* Keep your existing SSE code here */
+    for (i = 0; i < d; i++) {
         int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
         __m128 sum_v = _mm_setzero_ps(); float temp_sum = 0.0f;
         for (int j = 0; j < n; j += group_size) {
@@ -512,131 +659,18 @@ void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int gro
         }
         xout[i] = temp_sum;
     }
-    return;
-
-    #elif defined(__3dNOW__)
-    for (int i = 0; i < d; i++) {
-        __m64 row_acc = _m_from_int(0); int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
-        for (int j = 0; j < n; j += group_size) {
-            float scale = *s_ptr++; __m64 scale_v = _m_from_float(scale); scale_v = _m_punpckldq(scale_v, scale_v); 
-            for (int k = 0; k < group_size; k += 2) {
-                int32_t i0 = w_ptr[j+k]; int32_t i1 = w_ptr[j+k+1];
-                __m64 w_v = _m_pi2fd(_mm_set_pi32(i1, i0)); __m64 x_v = *(__m64*)&x[j+k];
-                row_acc = _m_pfadd(row_acc, _m_pfmul(x_v, _m_pfmul(w_v, scale_v)));
-            }
+#else
+    /* Non-Watcom Scalar Fallback */
+    for (i = 0; i < d; i++) {
+        float val = 0.0f; int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
+        int j;
+        for (j = 0; j < n; j += group_size) {
+            float scale = *s_ptr++; int k;
+            for (k = 0; k < group_size; k++) val += ((float)w_ptr[j+k] * scale) * x[j+k];
         }
-        row_acc = _m_pfacc(row_acc, row_acc); float res; *(__m64*)&res = row_acc; xout[i] = res;
+        xout[i] = val;
     }
-    _m_femms();
-    return;
-
-    #elif defined(__MMX__)
-    /* 
-       Dynamic Fixed-Point Quantization for MMX - High Precision
-       Quantizes float inputs (x) to full-range int16 to minimize divergence from FPU output.
-    */
-    {
-        int16_t x_quant[4096]; 
-        float x_scales[512];   
-        int32_t blk_sums[512]; 
-        int j, k;
-
-        // 1. FPU Phase: Pre-quantize input
-        // Optimization: Use ~15-bit range (32000) instead of 7-bit (127) for much higher precision.
-        for(j = 0; j < n; j += group_size) {
-            float max_val = 1e-9f; // Prevent divide-by-zero
-            int blk_limit = (j + group_size > n) ? n - j : group_size;
-            
-            // Find max absolute value in block
-            for(k = 0; k < blk_limit; k++) {
-                float v = x[j+k]; if(v < 0) v = -v; 
-                if(v > max_val) max_val = v;
-            }
-            
-            // Use 32000 to leave headroom for rounding overshoot
-            float scale = 32000.0f / max_val; 
-            float inv_scale = max_val / 32000.0f;
-            
-            x_scales[j / group_size] = inv_scale;
-
-            for(k = 0; k < blk_limit; k++) {
-                // Rounding (v + 0.5) is critical for accuracy vs simple truncation
-                float val = x[j+k] * scale;
-                x_quant[j+k] = (int16_t)(val + (val >= 0.0f ? 0.5f : -0.5f));
-            }
-        }
-
-        // 2. Row Loop
-        for (int i = 0; i < d; i++) {
-            int32_t in = i * n;
-            int8_t* w_row_start = &qt->q[in];
-            int blk_idx = 0;
-
-            // MMX Phase: Integer Dot Products
-            for (j = 0; j < n; j += group_size) {
-                int8_t* w_ptr = w_row_start + j;
-                int blk_limit = (j + group_size > n) ? n - j : group_size;
-                
-                __m64 sum_v = _mm_setzero_si64();
-                __m64 zero_v = _mm_setzero_si64();
-
-                for (k = 0; k <= blk_limit - 4; k += 4) {
-                    // Load weights (32-bit), unpack to 16-bit
-                    int32_t w_raw = *(int32_t*)&w_ptr[k];
-                    __m64 w_v = _mm_cvtsi32_si64(w_raw);
-                    __m64 mask = _mm_cmpgt_pi8(zero_v, w_v);
-                    __m64 w_16 = _mm_unpacklo_pi8(w_v, mask); 
-                    
-                    // Load input (64-bit, 4x int16)
-                    __m64 x_v = *(__m64*)&x_quant[j+k];
-
-                    // Multiply-Add: 16-bit * 16-bit -> 32-bit accumulation
-                    sum_v = _mm_add_pi32(sum_v, _mm_madd_pi16(w_16, x_v));
-                }
-
-                // Horizontal sum
-                __m64 high = _mm_srli_si64(sum_v, 32);
-                sum_v = _mm_add_pi32(sum_v, high);
-                int32_t blk_sum = _mm_cvtsi64_si32(sum_v);
-
-                // Scalar cleanup
-                for (; k < blk_limit; k++) {
-                    blk_sum += (int32_t)w_ptr[k] * (int32_t)x_quant[j+k];
-                }
-                
-                blk_sums[blk_idx++] = blk_sum;
-            }
-
-            // Clear MMX state before FPU operations
-            _mm_empty();
-
-            // FPU Phase: Accumulate with scales
-            float val = 0.0f;
-            float* s_ptr = &qt->s[in / group_size];
-            for (int b = 0; b < blk_idx; b++) {
-                 // Reconstruct: sum * weight_scale * activation_scale
-                 val += (float)blk_sums[b] * s_ptr[b] * x_scales[b];
-            }
-            xout[i] = val;
-        }
-    }
-    return;
-    #endif
-
-    /* Scalar Fallback */
-    {
-        int i;
-        for (i = 0; i < d; i++) {
-            float val = 0.0f; int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
-            int j;
-            for (j = 0; j < n; j += group_size) {
-                float scale = *s_ptr++;
-                int k;
-                for (k = 0; k < group_size && (j+k) < n; k++) val += ((float)w_ptr[j+k] * scale) * x[j+k];
-            }
-            xout[i] = val;
-        }
-    }
+#endif
 }
 
 float* forward(Transformer* t, int token, int pos, int stride_steps) {
@@ -644,18 +678,20 @@ float* forward(Transformer* t, int token, int pos, int stride_steps) {
     float *x = s->x; int dim = p->dim; int kv_dim = p->n_kv_heads * p->head_size; int gs = t->group_size;
     int offset = token * dim;
     unsigned long long l; int i, h;
+    int loff;
 
     for (i = 0; i < dim; i++) x[i] = (float)w->token_embedding_table.q[offset + i] * w->token_embedding_table.s[offset/gs + i/gs];
 
     for(l = 0; l < p->n_layers; l++) {
-        int loff;
         rmsnorm(s->xb, x, w->rms_att_weight + l*dim, dim);
         loff = l * stride_steps * kv_dim; s->k = s->key_cache + loff + pos * kv_dim; s->v = s->value_cache + loff + pos * kv_dim;
         matmul_q8(s->q, s->xb, &w->wq[l], dim, p->n_heads * p->head_size, gs);
         matmul_q8(s->k, s->xb, &w->wk[l], dim, kv_dim, gs);
         matmul_q8(s->v, s->xb, &w->wv[l], dim, kv_dim, gs);
         
-        #if defined(__3dNOW__)
+        #if defined(__3dNOW__) && defined(__WATCOMC__)
+        // handled in block
+        #elif defined(__3dNOW__) 
         _m_femms();
         #endif
 
@@ -691,7 +727,9 @@ float* forward(Transformer* t, int token, int pos, int stride_steps) {
         matmul_q8(s->hb, s->xb, &w->w1[l], dim, p->hidden_dim, gs);
         matmul_q8(s->hb2, s->xb, &w->w3[l], dim, p->hidden_dim, gs);
         
-        #if defined(__3dNOW__)
+        #if defined(__3dNOW__) && defined(__WATCOMC__)
+        // handled
+        #elif defined(__3dNOW__)
         _m_femms();
         #endif
         
@@ -715,8 +753,9 @@ typedef struct { int vocab_size; ProbIndex* probindex; float temperature; float 
 int compare_tokens(const void *a, const void *b) { return strcmp(((TokenIndex*)a)->str, ((TokenIndex*)b)->str); }
 char* decode(Tokenizer* t, int prev_token, int token) { 
     char *piece = t->vocab[token]; unsigned char byte_val;
+    int b;
     if (prev_token == 1 && piece[0] == ' ') piece++; 
-    if (sscanf(piece, "<0x%02hhX>", &byte_val) == 1) piece = (char*)t->byte_pieces + byte_val * 2; 
+    if (sscanf(piece, "<0x%02X>", &b) == 1) piece = (char*)t->byte_pieces + b * 2; 
     return piece; 
 }
 
@@ -759,8 +798,13 @@ void encode(Tokenizer* t, char *text, int8_t bos, int8_t eos, int *tokens, int *
 }
 
 void build_tokenizer(Tokenizer* t, char* path, int vs) {
-    int i; FILE *file;
-    t->vocab_size = vs; t->vocab = malloc(vs * sizeof(char*)); t->vocab_scores = malloc(vs * sizeof(float)); t->sorted_vocab = NULL;
+    int i; 
+    FILE *file;
+    t->vocab_size = vs; 
+    t->vocab = malloc(vs * sizeof(char*)); 
+    t->vocab_scores = malloc(vs * sizeof(float)); 
+    t->sorted_vocab = NULL;
+    
     for (i = 0; i < 256; i++) { t->byte_pieces[i*2] = (unsigned char)i; t->byte_pieces[i*2+1] = '\0'; }
     file = fopen(path, "rb"); if (!file) exit(1);
     fread(&t->max_token_length, sizeof(int), 1, file);
@@ -768,11 +812,12 @@ void build_tokenizer(Tokenizer* t, char* path, int vs) {
     t->max_token_length = bswap32(t->max_token_length);
     #endif
     for (i = 0; i < vs; i++) { 
+        int len; 
         fread(t->vocab_scores + i, sizeof(float), 1, file); 
         #if defined(NEEDS_BSWAP)
         t->vocab_scores[i] = bswap_float(t->vocab_scores[i]);
         #endif
-        int len; if (fread(&len, sizeof(int), 1, file) != 1) { break; }
+        if (fread(&len, sizeof(int), 1, file) != 1) { break; }
         #if defined(NEEDS_BSWAP)
         len = bswap32(len);
         #endif
@@ -807,7 +852,7 @@ int sample(Sampler* s, float* logits) {
 }
 
 /* ---------------------------------------------------------------------------- */
-/* TUI ENGINE (Unified: Windows 95 API & POSIX ANSI) */
+/* TUI ENGINE */
 /* ---------------------------------------------------------------------------- */
 
 #if defined _WIN32
@@ -821,10 +866,17 @@ int sample(Sampler* s, float* logits) {
     TUI tui;
 
     void tui_init() {
-        tui.hOut = GetStdHandle(STD_OUTPUT_HANDLE); tui.hIn = GetStdHandle(STD_INPUT_HANDLE);
-        DWORD mode; GetConsoleMode(tui.hIn, &mode); SetConsoleMode(tui.hIn, mode | ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT);
+        DWORD mode;
+        CONSOLE_SCREEN_BUFFER_INFO csbi;
+        
+        tui.hOut = GetStdHandle(STD_OUTPUT_HANDLE); 
+        tui.hIn = GetStdHandle(STD_INPUT_HANDLE);
+        
+        GetConsoleMode(tui.hIn, &mode); 
+        SetConsoleMode(tui.hIn, mode | ENABLE_MOUSE_INPUT | ENABLE_WINDOW_INPUT);
         SetConsoleCtrlHandler(CtrlHandler, TRUE);
-        CONSOLE_SCREEN_BUFFER_INFO csbi; GetConsoleScreenBufferInfo(tui.hOut, &csbi);
+        
+        GetConsoleScreenBufferInfo(tui.hOut, &csbi);
         tui.cols = csbi.srWindow.Right - csbi.srWindow.Left + 1; tui.rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
         if (tui.cols > SCREEN_W) tui.cols = SCREEN_W - 1; if (tui.cols < 20) tui.cols = 80; 
         tui.count = 0; tui.view_offset = 0; tui.input_len = 0; tui.input[0] = '\0'; tui.mode = 0;
@@ -884,7 +936,6 @@ int sample(Sampler* s, float* logits) {
         SetConsoleCursorPosition(tui.hOut, cur); free(buf);
     }
 #else
-    /* POSIX / Mac OS X TUI Implementation using ANSI Escape Codes */
     struct termios orig_termios;
     void disable_raw_mode() { tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios); }
     void enable_raw_mode() {
@@ -903,7 +954,7 @@ int sample(Sampler* s, float* logits) {
 #endif
 
 /* ---------------------------------------------------------------------------- */
-/* GENERATION & CHAT LOGIC */
+/* GENERATION */
 /* ---------------------------------------------------------------------------- */
 
 void generate(Transformer *t, Tokenizer *tok, Sampler *samp, char *prompt, int steps) {
@@ -947,32 +998,30 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
     while(1) {
         #if defined _WIN32
         if (use_tui) {
+            INPUT_RECORD ir[32]; DWORD n;
             tui.mode = 0; tui.input[0] = '\0'; tui.input_len = 0; tui.view_offset = 0;
-            {
-                INPUT_RECORD ir[32]; DWORD n;
-                while(1) {
-                    tui_draw(); ReadConsoleInput(tui.hIn, ir, 1, &n);
-                    if (ir[0].EventType == KEY_EVENT && ir[0].Event.KeyEvent.bKeyDown) {
-                        char c = ir[0].Event.KeyEvent.uChar.AsciiChar; WORD vk = ir[0].Event.KeyEvent.wVirtualKeyCode;
-                        if (c == 13) break; 
-                        else if (c == 8) { if (tui.input_len > 0) tui.input[--tui.input_len] = '\0'; }
-                        else if (c >= 32) { if (tui.input_len < 1000) { tui.input[tui.input_len++] = c; tui.input[tui.input_len] = '\0'; } }
-                        else { 
-                            if (vk == 33) { tui.view_offset += 5; } 
-                            if (vk == 34) { tui.view_offset -= 5; if(tui.view_offset<0) tui.view_offset=0; } 
-                        }
+
+            while(1) {
+                tui_draw(); ReadConsoleInput(tui.hIn, ir, 1, &n);
+                if (ir[0].EventType == KEY_EVENT && ir[0].Event.KeyEvent.bKeyDown) {
+                    char c = ir[0].Event.KeyEvent.uChar.AsciiChar; WORD vk = ir[0].Event.KeyEvent.wVirtualKeyCode;
+                    if (c == 13) break; 
+                    else if (c == 8) { if (tui.input_len > 0) tui.input[--tui.input_len] = '\0'; }
+                    else if (c >= 32) { if (tui.input_len < 1000) { tui.input[tui.input_len++] = c; tui.input[tui.input_len] = '\0'; } }
+                    else { 
+                        if (vk == 33) { tui.view_offset += 5; } 
+                        if (vk == 34) { tui.view_offset -= 5; if(tui.view_offset<0) tui.view_offset=0; } 
                     }
                 }
             }
+            
             strcpy(input_buf, tui.input); 
             { char hist[1050]; sprintf(hist, ">>> %s\n", input_buf); tui_append(hist); }
         } else 
         #else
-        /* POSIX Raw Input Mode to replicate TUI feel */
         if (use_tui) {
             char c; int idx = 0; char* ph = "Send a message (/? for help)";
             printf("%s>>> %s", ANSI_COLOR_GREEN, ANSI_COLOR_RESET);
-            /* Initially print placeholder */
             printf("%s%s%s", ANSI_COLOR_GRAY, ph, ANSI_COLOR_RESET);
             printf("\033[%dD", (int)strlen(ph)); fflush(stdout);
             
@@ -980,21 +1029,20 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
             while(read(STDIN_FILENO, &c, 1) == 1) {
                 if (c == 3) { stop_generation = 1; disable_raw_mode(); exit(0); }
                 
-                if (c == 127 || c == 8) { /* Backspace */
+                if (c == 127 || c == 8) { 
                     if (idx > 0) { 
                         idx--; printf("\b \b"); 
                         if (idx == 0) { 
-                            /* Buffer empty, restore placeholder */
                             printf("%s%s%s", ANSI_COLOR_GRAY, ph, ANSI_COLOR_RESET);
                             printf("\033[%dD", (int)strlen(ph));
                         }
                         fflush(stdout); 
                     }
                 } else if (c == '\n' || c == '\r') {
-                    if (idx == 0) printf("%s", ANSI_CLEAR_LINE); /* Clear placeholder */
+                    if (idx == 0) printf("%s", ANSI_CLEAR_LINE); 
                     input_buf[idx] = 0; printf("\n"); break;
                 } else if (c >= 32 && idx < 1023) {
-                    if (idx == 0) printf("%s", ANSI_CLEAR_LINE); /* Clear placeholder on first char */
+                    if (idx == 0) printf("%s", ANSI_CLEAR_LINE); 
                     input_buf[idx++] = c; printf("%c", c); fflush(stdout);
                 }
             }
@@ -1089,9 +1137,13 @@ int main(int argc, char *argv[]) {
     char *prompt = NULL; char *mode = "chat"; char *sys_prompt = NULL;
     int i; 
     unsigned long long rng_seed = 0;
+#if defined _WIN32
+    /* C89 Strict: variable declarations at valid top scope */
+    LARGE_INTEGER qpc; 
+#endif
 
 #if defined _WIN32
-    LARGE_INTEGER qpc; QueryPerformanceCounter(&qpc); rng_seed = (unsigned long long)qpc.QuadPart;
+    QueryPerformanceCounter(&qpc); rng_seed = (unsigned long long)qpc.QuadPart;
 #else
     rng_seed = (unsigned long long)time(NULL);
 #endif
