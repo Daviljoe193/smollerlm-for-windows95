@@ -1,5 +1,7 @@
 # smollerlm-for-windows95
-Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II ~~and lower~~).
+Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower).
+
+SPECIFICALLY, this is the testing branch for getting older support working. I broke some things on my way here, so for Pentium II and III + PPX OS X support, use the main branch. Expect this to be properly merged in when I'm able to. Though I'll bundle it all into the releases. Also the seeds are weird on the Open Watcom builds, so don't expect the same outputs from the mingw builds vs the Watcom builds, though that'll also be fixed soon.
 
 ![](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/main/llamac-smol-ghdemo.avif)
 
@@ -17,58 +19,31 @@ To run it, first you'll need Ubuntu 24.04 LTS or later (Or earlier, I guess? Thi
 git clone https://github.com/Daviljoe193/smollerlm-for-windows95
 ```
 
-and also for compiling the Windows 95 versions
+and install Open Watcom. Since there's no DEB for it that I know of (Only a crappy SNAP), I've made a .deb myself. Download it from the releases page, and install it with
 
 ```
-sudo apt install mingw-w64
+sudo apt install ./openwatcom-v2_2.0-20251103_amd64.deb
 ```
 
-Then compile it with SSE support (For Windows 9x, I'd recommend [JHRobotics/simd95](https://github.com/JHRobotics/simd95), the speed boost is worth it) using
+Also in the terminal you're compiling in, make sure to export the following...
 
 ```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium3 -mtune=pentium3 -mfpmath=sse -msse -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+export WATCOM=/opt/watcom
+export INCLUDE=$WATCOM/h:$WATCOM/h/nt
+export LIB=$WATCOM/lib386:$WATCOM/lib386/nt
+export PATH=$WATCOM/binl:$PATH
 ```
 
-...or if you instead want 3DNow! support (Can't leave '90s Team Red high and dry, after all), using **GARBAGE MODEL OUTPUT, WILL FIX**
+Now for Pentium MMX / AMD K6 / K6_2, you'll build with
 
 ```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6-2 -mtune=athlon -m3dnow -fno-math-errno -ffinite-math-only -funsafe-math-optimizations -funroll-loops -static -s -D__3dNOW__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
+wcl386 run-smol.c -fe=run_smol.exe -l=nt -bt=nt -4 -fp3 -otexan -s -d_WIN32_WINNT=0x0400
 ```
 
-Or for slightly older Team Red, on the original K6 (using MMX) **CURRENTLY BROKEN, WILL FIX**
+...or for Intel 486DX / Pentium (Scalar only. Works, but this is the masochist route!)
 
 ```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=k6 -mtune=k6 -mmmx -mno-3dnow -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
-```
-
-...or for Pentium II with MMX...
-
-```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium2 -mtune=pentium2 -mmmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
-```
-
-...or Pentium MMX... **CURRENTLY BROKEN, WILL FIX**
-
-```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium-mmx -mtune=pentium-mmx -mmmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D__MMX__ -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
-```
-
-...or for Intel 486DX (Scalar only, for masochists) **CURRENTLY BROKEN, WILL FIX**
-
-```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=i486 -mtune=i486 -mno-mmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
-```
-
-...or for Pentium (Scalar only, for masochists with standards) **ALSO CURRENTLY BROKEN, WILL FIX**
-
-```
-i686-w64-mingw32-gcc run-smol.c -o run_smol.exe -O3 -march=pentium -mtune=pentium -mno-mmx -mno-sse -mno-sse2 -mfpmath=387 -funroll-loops -static -s -D_WIN32_WINNT=0x0400 -D__USE_MINGW_ANSI_STDIO=0 -Wno-unknown-pragmas -Wno-attributes -fno-asynchronous-unwind-tables -Wl,--subsystem,console:4.0 -Wl,--allow-multiple-definition -Wl,--wrap=AddVectoredExceptionHandler -Wl,--wrap=RemoveVectoredExceptionHandler -Wl,--wrap=SetThreadStackGuarantee
-```
-
-PowerPC G4 support is experimental (and unimpressive ATM, especially since I'm aiming for Yikes! support), and as of now, I cannot figure out how to cross compile this. On a PowerPC Mac with a G4 or better (Or in a QEMU G4 environment), with Xcode 2.5 installed, run
-
-```
-gcc run-smol.c -o run_smol -O3 -mcpu=7450 -maltivec -mabi=altivec -lm -D__G4__l
+wcl386 run-smol.c -fe=run_smol.exe -l=nt -bt=nt -5 -fp5 -otexan -s -d_WIN32_WINNT=0x0400
 ```
 
 Afterwards, you need an LLM and a tokenizer. Currently the scope of this project is so small that it only somewhat supports the SmollerLM family of LLMs by mehmetkeremturkcan on HuggingFace, and no other models currently work. Choose one of his models in that family (I personally went with [this 10 million parameter one](https://huggingface.co/mehmetkeremturkcan/SmollerLM2-10M-sftb), [this 20M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-20M-Instruct-PrunedPostTrained-sft2), [and this 48M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-48M-Instruct-ft-sft)), then...
