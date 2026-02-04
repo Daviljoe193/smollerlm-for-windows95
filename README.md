@@ -1,5 +1,5 @@
 # smollerlm-for-windows95
-Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower). (Check the OpenWatcom branch for Pentium / Pentium MMX / AMD K6 / K6_2 code that hasn't yet been merged)
+Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower). (Check the branches for [https://github.com/Daviljoe193/smollerlm-for-windows95/tree/Open-Watcom](Pentium / Pentium MMX / AMD K6 / K6_2 code) that hasn't yet been merged), or for [https://github.com/Daviljoe193/smollerlm-for-windows95/tree/macos-classic](the experimental Mac OS 8.x / 9.x version), which is going to be a nightmare to merge codebases with.
 
 ![](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/main/llamac-smol-ghdemo.avif)
 
@@ -7,7 +7,7 @@ Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 
 
 This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for Windows 95.
 
-If you don't want to build everything yourself, I have a prebuild in the releases section, [here](https://github.com/Daviljoe193/smollerlm-for-windows95/releases). Otherwise...
+If you don't want to build everything yourself, I have a bunch of convenient prebuilds for every platform I've worked on in the releases section, [here](https://github.com/Daviljoe193/smollerlm-for-windows95/releases). Otherwise...
 
 ---
 
