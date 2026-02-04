@@ -17,7 +17,7 @@ If you don't want to build everything yourself, I have a prebuild in the release
 To run it, first you'll need Ubuntu 24.04 LTS or later (Or earlier, I guess? This just what I got.) for making the model/tokenizer files, and to
 
 ```
-git clone https://github.com/Daviljoe193/smollerlm-for-windows95
+git clone -b macos-classic https://github.com/Daviljoe193/smollerlm-for-windows95
 ```
 
 You'll also need a G4 Mac running either Mac OS 8.6 to 9.x, or Mac OS 10.x on G4 (Or `qemu-system-ppc -cpu G4` type setup) with a classic environment set up. On that environment, you'll need to install Metrowerks CodeWarrior Pro 5 (Which, pst, is abandonware that's on MacintoshRepository) with all the Mac components for the IDE installed. Now you'll need a directory structure kinda like this...
