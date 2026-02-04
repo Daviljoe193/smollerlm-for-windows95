@@ -16,7 +16,7 @@ If you don't want to build everything yourself, I have a prebuild in the release
 To run it, first you'll need Ubuntu 24.04 LTS or later (Or earlier, I guess? This just what I got.), and to
 
 ```
-git clone https://github.com/Daviljoe193/smollerlm-for-windows95
+git clone -b Open-Watcom https://github.com/Daviljoe193/smollerlm-for-windows95
 ```
 
 and install Open Watcom. Since there's no DEB for it that I know of (Only a crappy SNAP), I've made a .deb myself. Download it from the releases page, and install it with
