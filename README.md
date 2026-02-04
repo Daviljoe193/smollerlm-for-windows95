@@ -1,5 +1,7 @@
-# smollerlm-for-windows95
-Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower). (Check the OpenWatcom branch for Pentium / Pentium MMX / AMD K6 / K6_2 code that hasn't yet been merged)
+# smollerlm-for-~~windows95~~macos9x
+Just a dumb attempt at vibe coding my way into making an LLM runable on ~~Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower)~~ Mac OS 8.6 and 9.x.
+
+Yep, another branch, another ridiculous port. Everything below is placeholder, it's all unrelated to this port.
 
 ![](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/main/llamac-smol-ghdemo.avif)
 
