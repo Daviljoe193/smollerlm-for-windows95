@@ -1,7 +1,7 @@
 # smollerlm-for-~~windows95~~macos9x
 Just a dumb attempt at vibe coding my way into making an LLM runable on ~~Windows 95 with a Pentium 3 (And other similarly unreasonable targets, now even supporting Pentium II and lower)~~ Mac OS 8.6 and 9.x.
 
-Yep, another branch, another ridiculous port. Everything below is placeholder, it's all unrelated to this port.
+Yep, another branch, another ridiculous port.
 
 ![](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/macos-classic/llamac-smol-ghdemo-macclassicenv.avif)
 <sup>I really need to get my G4 iMac out of storage to get a real feel for performance.</sup>
