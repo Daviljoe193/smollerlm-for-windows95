@@ -4,6 +4,7 @@
    Compiler: CodeWarrior 5
 */
 
+#include <Memory.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,6 +68,9 @@ volatile int stop_generation = 0;
 /* Globals to preserve the Application Folder location */
 short gAppVol;
 long gAppDir;
+
+/* Global handle to keep track of the Temporary Memory block */
+Handle gModelHandle = NULL;
 
 /* ---------------------------------------------------------------------------- */
 /* MATH & HELPERS */
@@ -336,7 +340,21 @@ typedef struct { float *x, *xb, *xb2, *hb, *hb2, *q, *k, *v, *att, *logits; floa
 typedef struct { Config config; TransformerWeights weights; RunState state; void* data; size_t file_size; int group_size; } Transformer;
 
 void free_run_state(RunState* s) { if(s->x) free_aligned(s->x); if(s->xb) free_aligned(s->xb); if(s->xb2) free_aligned(s->xb2); if(s->hb) free_aligned(s->hb); if(s->hb2) free_aligned(s->hb2); if(s->q) free_aligned(s->q); if(s->att) free_aligned(s->att); if(s->logits) free_aligned(s->logits); if(s->key_cache) free_aligned(s->key_cache); if(s->value_cache) free_aligned(s->value_cache); if(s->rope_cos) free_aligned(s->rope_cos); if(s->rope_sin) free_aligned(s->rope_sin); }
-void free_transformer(Transformer* t) { free(t->weights.wq); free(t->weights.wk); free(t->weights.wv); free(t->weights.wo); free(t->weights.w1); free(t->weights.w2); free(t->weights.w3); if(t->data) free_aligned(t->data); free_run_state(&t->state); }
+
+void free_transformer(Transformer* t) { 
+    free(t->weights.wq); free(t->weights.wk); free(t->weights.wv); free(t->weights.wo); 
+    free(t->weights.w1); free(t->weights.w2); free(t->weights.w3); 
+    
+    /* Handle cleanup */
+    if (gModelHandle != NULL) {
+        DisposeHandle(gModelHandle);
+        gModelHandle = NULL;
+    } else if (t->data) {
+        free_aligned(t->data); 
+    }
+    
+    free_run_state(&t->state); 
+}
 
 void precompute_freqs(RunState* s, Config* p, int alloc_steps) {
     int head_size = p->head_size; int pos, i;
@@ -406,25 +424,20 @@ void load_weights(Transformer* t, int shared_weights) {
 
 void build_transformer(Transformer *t, int steps) {
     FILE *file; uint32_t magic; int version; uint8_t shared; int *pConf; int i; char fname_buf[256];
+    OSErr err;
+//    Size actualSize;
     
-    /* LOGGING: Trace entry */
     DumpDebugLog("BuildTransformer", "Starting", gPrefs.steps);
 
-    /* FIX: Temporarily set the working directory to the Model's folder */
     if (HSetVol(NULL, gPrefs.lastModel.vRefNum, gPrefs.lastModel.parID) != noErr) { 
-        DumpDebugLog("Error", "HSetVol Failed", 0);
         StopAlert(kAlertStopAlert, "\pError: Model file inaccessible."); ExitToShell(); 
     }
     
     memcpy(fname_buf, gPrefs.lastModel.name, 256); P2CStr((unsigned char*)fname_buf);
     file = fopen(fname_buf, "rb"); 
-    if (!file) {
-        DumpDebugLog("Error", "Fopen Failed", 0);
-        ExitToShell();
-    }
+    if (!file) ExitToShell();
     
     fseek(file, 0, SEEK_END); t->file_size = ftell(file); fseek(file, 0, SEEK_SET);
-    DumpDebugLog("Model Size", "Bytes", t->file_size);
 
     fread(&magic, sizeof(uint32_t), 1, file); fread(&version, sizeof(int), 1, file);
     fread(&t->config, sizeof(int) * 8, 1, file);
@@ -435,27 +448,38 @@ void build_transformer(Transformer *t, int steps) {
     
     InitCursor(); SetCursor(*GetCursor(watchCursor));
     
-    /* LOGGING: Trace Allocation */
-    DumpDebugLog("Allocating RAM", "Size", t->file_size);
-    t->data = malloc_aligned(t->file_size); 
+    /* --------------------------------------------------------- */
+    /* MEMORY STRATEGY CHANGE: Use Temporary Memory for Model Data */
+    /* --------------------------------------------------------- */
+    DumpDebugLog("Allocating Temp RAM", "Size", t->file_size);
     
-    if (!t->data) { 
-        DumpDebugLog("Error", "Malloc Failed - OOM", t->file_size);
-        StopAlert(kAlertStopAlert, "\pOut of RAM. Increase App Memory Partition in Finder."); 
-        ExitToShell(); 
+    /* Attempt to allocate in System Heap (Temporary Memory) */
+    gModelHandle = TempNewHandle(t->file_size + 16, &err);
+    
+    if (err != noErr || gModelHandle == NULL) {
+        /* Fallback: Try standard App Heap if Temp fails */
+        DumpDebugLog("TempAlloc Failed", "Trying App Heap", err);
+        t->data = malloc_aligned(t->file_size);
+        gModelHandle = NULL; /* Flag that we used malloc */
+    } else {
+        /* Lock the handle high to prevent fragmentation, then dereference */
+        HLockHi(gModelHandle);
+        t->data = (void*)(((uintptr_t)(*gModelHandle) + 15) & ~0x0F); // Align manually just in case
     }
     
-    fseek(file, 0, SEEK_SET); fread(t->data, 1, t->file_size, file); fclose(file);
-    DumpDebugLog("File Read", "Done", 0);
+    if (!t->data) { 
+        DumpDebugLog("Error", "All Allocations Failed - OOM", t->file_size);
+        StopAlert(kAlertStopAlert, "\pOut of RAM. Increase App Memory Partition or System RAM."); 
+        ExitToShell(); 
+    }
+    /* --------------------------------------------------------- */
     
-    /* FIX: Restore Application Folder Volume immediately */
+    fseek(file, 0, SEEK_SET); fread(t->data, 1, t->file_size, file); fclose(file);
+    
     HSetVol(NULL, gAppVol, gAppDir);
     
     InitCursor(); load_weights(t, shared); 
-    DumpDebugLog("Weights Loaded", "Done", 0);
-    
     malloc_run_state(&t->state, &t->config, steps);
-    DumpDebugLog("RunState Alloc", "Done", 0);
 }
 
 /* ---------------------------------------------------------------------------- */
@@ -463,13 +487,38 @@ void build_transformer(Transformer *t, int steps) {
 /* ---------------------------------------------------------------------------- */
 
 void rmsnorm(float* o, float* x, float* weight, int size) {
-    float ss = 0.0f; int i = 0; vector float sum_v = vec_splats(0.0f); vector float zero_v = vec_splats(0.0f);
-    for (; i <= size - 4; i += 4) { vector float xv = vec_ld(0, &x[i]); sum_v = vec_madd(xv, xv, sum_v); }
-    { union { vector float v; float f[4]; } u; u.v = sum_v; ss = u.f[0] + u.f[1] + u.f[2] + u.f[3]; }
+    float ss = 0.0f; int i = 0; 
+    vector float sum_v = vec_splats(0.0f); 
+    vector float zero_v = vec_splats(0.0f);
+    
+    /* CodeWarrior Stack Alignment Safety: */
+    /* We cannot trust the stack to be 16-byte aligned for the union. */
+    /* We store to a vector-aligned buffer first. */
+    vector float buf;
+    float* fptr = (float*)&buf;
+
+    for (; i <= size - 4; i += 4) { 
+        vector float xv = vec_ld(0, &x[i]); 
+        sum_v = vec_madd(xv, xv, sum_v); 
+    }
+    
+    /* Extract sum safely */
+    buf = sum_v;
+    ss = fptr[0] + fptr[1] + fptr[2] + fptr[3];
+
     for (; i < size; i++) { ss += x[i] * x[i]; }
     ss /= size; ss += 1e-5f; ss = 1.0f / sqrt(ss);
-    { vector float ss_v = vec_splats(ss); i = 0;
-      for (; i <= size - 4; i += 4) { vector float xv = vec_ld(0, &x[i]); vector unsigned char w_raw = vec_load_unaligned((unsigned char*)&weight[i]); vector float wv = (vector float)w_raw; vector float res = vec_madd(wv, vec_madd(xv, ss_v, zero_v), zero_v); vec_st(res, 0, &o[i]); }
+
+    { 
+        vector float ss_v = vec_splats(ss); 
+        i = 0;
+        for (; i <= size - 4; i += 4) { 
+            vector float xv = vec_ld(0, &x[i]); 
+            vector unsigned char w_raw = vec_load_unaligned((unsigned char*)&weight[i]); 
+            vector float wv = (vector float)w_raw; 
+            vector float res = vec_madd(wv, vec_madd(xv, ss_v, zero_v), zero_v); 
+            vec_st(res, 0, &o[i]); 
+        }
     }
     for (; i < size; i++) { o[i] = weight[i] * (ss * x[i]); }
 }
@@ -483,34 +532,68 @@ void softmax(float* x, int size) {
 
 void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int group_size) {
     if (group_size % 4 == 0 && group_size >= 16) {
-        int i; vector float zero_v = vec_splats(0.0f);
+        int i; 
+        vector float zero_v = vec_splats(0.0f);
+        
+        /* Re-use a single aligned buffer for extraction to save stack churn */
+        vector float res_buf;
+        float* res_ptr = (float*)&res_buf;
+
         for (i = 0; i < d; i++) {
-            int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
-            vector float v_sum = vec_splats(0.0f); int j = 0;
+            int32_t in = i * n; 
+            float* s_ptr = &qt->s[in / group_size]; 
+            int8_t* w_ptr = &qt->q[in];
+            vector float v_sum = vec_splats(0.0f); 
+            int j = 0;
+            
             for (; j < n; j += group_size) {
-                float scale = *s_ptr++; vector float v_scale = vec_splats(scale); int k;
+                float scale = *s_ptr++; 
+                vector float v_scale = vec_splats(scale); 
+                int k;
                 for (k = 0; k < group_size; k += 16) {
                     vector unsigned char raw_w = vec_load_unaligned((unsigned char*)&w_ptr[j+k]);
-                    vector float vf_w_0 = vec_ctf(vec_unpackh(vec_unpackh((vector signed char)raw_w)), 0);
-                    vector float vf_w_1 = vec_ctf(vec_unpackl(vec_unpackh((vector signed char)raw_w)), 0);
-                    vector float vf_w_2 = vec_ctf(vec_unpackh(vec_unpackl((vector signed char)raw_w)), 0);
-                    vector float vf_w_3 = vec_ctf(vec_unpackl(vec_unpackl((vector signed char)raw_w)), 0);
-                    vf_w_0 = vec_madd(vf_w_0, v_scale, zero_v); vf_w_1 = vec_madd(vf_w_1, v_scale, zero_v);
-                    vf_w_2 = vec_madd(vf_w_2, v_scale, zero_v); vf_w_3 = vec_madd(vf_w_3, v_scale, zero_v);
+                    /* Unpack chars to shorts, then shorts to ints, then convert to floats */
+                    vector signed short w_h = vec_unpackh((vector signed char)raw_w);
+                    vector signed short w_l = vec_unpackl((vector signed char)raw_w);
+                    
+                    vector float vf_w_0 = vec_ctf(vec_unpackh(w_h), 0);
+                    vector float vf_w_1 = vec_ctf(vec_unpackl(w_h), 0);
+                    vector float vf_w_2 = vec_ctf(vec_unpackh(w_l), 0);
+                    vector float vf_w_3 = vec_ctf(vec_unpackl(w_l), 0);
+                    
+                    /* Dequantize */
+                    vf_w_0 = vec_madd(vf_w_0, v_scale, zero_v); 
+                    vf_w_1 = vec_madd(vf_w_1, v_scale, zero_v);
+                    vf_w_2 = vec_madd(vf_w_2, v_scale, zero_v); 
+                    vf_w_3 = vec_madd(vf_w_3, v_scale, zero_v);
+                    
+                    /* Accumulate */
                     v_sum = vec_madd(vf_w_0, vec_ld(0, &x[j+k]), v_sum);
                     v_sum = vec_madd(vf_w_1, vec_ld(16, &x[j+k]), v_sum);
                     v_sum = vec_madd(vf_w_2, vec_ld(32, &x[j+k]), v_sum);
                     v_sum = vec_madd(vf_w_3, vec_ld(48, &x[j+k]), v_sum);
                 }
             }
-            { union { vector float v; float f[4]; } u; u.v = v_sum; xout[i] = u.f[0] + u.f[1] + u.f[2] + u.f[3]; }
+            /* Safe extraction */
+            res_buf = v_sum;
+            xout[i] = res_ptr[0] + res_ptr[1] + res_ptr[2] + res_ptr[3];
         }
     } else {
-        int i; for (i = 0; i < d; i++) {
-            float val = 0.0f; int32_t in = i * n; float* s_ptr = &qt->s[in / group_size]; int8_t* w_ptr = &qt->q[in];
-            int j; for (j = 0; j < n; j += group_size) {
-                float scale = *s_ptr++; int k; for (k = 0; k < group_size && (j+k) < n; k++) val += ((float)w_ptr[j+k] * scale) * x[j+k];
-            } xout[i] = val;
+        /* Fallback for odd sizes */
+        int i; 
+        for (i = 0; i < d; i++) {
+            float val = 0.0f; 
+            int32_t in = i * n; 
+            float* s_ptr = &qt->s[in / group_size]; 
+            int8_t* w_ptr = &qt->q[in];
+            int j; 
+            for (j = 0; j < n; j += group_size) {
+                float scale = *s_ptr++; 
+                int k; 
+                for (k = 0; k < group_size && (j+k) < n; k++) 
+                    val += ((float)w_ptr[j+k] * scale) * x[j+k];
+            } 
+            xout[i] = val;
         }
     }
 }
@@ -642,22 +725,49 @@ void build_tokenizer(Tokenizer* t, char* path, int vs) {
     fclose(file);
 }
 
+/* Add helper to detect NaN without C99 <math.h> macros if needed */
+int is_nan_safe(float x) {
+    unsigned long *u = (unsigned long*)&x;
+    return ((*u & 0x7F800000UL) == 0x7F800000UL) && (*u & 0x007FFFFFUL);
+}
+
 int sample(Sampler* s, float* logits) {
     int i; int q;
-    if (s->temperature == 0.0f) { int max_i=0; float max_p=logits[0]; for(i=1;i<s->vocab_size;i++) if(logits[i]>max_p){max_i=i;max_p=logits[i];} return max_i; }
+    
+    /* Safety Check: If the first logit is NaN, the model has collapsed. Return Newline. */
+    if (is_nan_safe(logits[0])) {
+        return 198; /* ID for newline in Llama 2 tokenizer */
+    }
+
+    if (s->temperature == 0.0f) { 
+        int max_i=0; float max_p=logits[0]; 
+        for(i=1;i<s->vocab_size;i++) if(logits[i]>max_p){max_i=i;max_p=logits[i];} 
+        return max_i; 
+    }
+    
     for (q=0; q<s->vocab_size; q++) logits[q] /= s->temperature; 
     softmax(logits, s->vocab_size);
+    
     if (s->topk > 0 && s->topk < s->vocab_size) {
         float topk_sum = 0.0f; float coin; float cdf = 0.0f;
         for (i = 0; i < s->vocab_size; i++) { s->probindex[i].index = i; s->probindex[i].prob = logits[i]; }
         qsort(s->probindex, s->vocab_size, sizeof(ProbIndex), compare_probindex);
+        
         for (i = 0; i < s->topk; i++) topk_sum += s->probindex[i].prob;
+        
         coin = (float)rand() / (float)RAND_MAX * topk_sum; 
-        for (i = 0; i < s->topk; i++) { cdf += s->probindex[i].prob; if (coin < cdf) return s->probindex[i].index; }
+        
+        for (i = 0; i < s->topk; i++) { 
+            cdf += s->probindex[i].prob; 
+            if (coin < cdf) return s->probindex[i].index; 
+        }
         return s->probindex[s->topk-1].index;
     } else {
         float coin = (float)rand() / (float)RAND_MAX; float cdf = 0.0f; 
-        for (i = 0; i < s->vocab_size; i++) { cdf += logits[i]; if (coin < cdf) return i; }
+        for (i = 0; i < s->vocab_size; i++) { 
+            cdf += logits[i]; 
+            if (coin < cdf) return i; 
+        }
         return s->vocab_size - 1;
     }
 }
