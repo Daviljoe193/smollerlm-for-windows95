@@ -44,7 +44,7 @@ python export-smol.py smollerlm2_10m_q80.bin --hf mehmetkeremturkcan/SmollerLM2-
 python export_tokenizer.py --hf mehmetkeremturkcan/SmollerLM2-10M-sftb -o tokenizer.bin
 ```
 
-Now you'll have the model and tokenizer in a llama2.c-ish INT8 format. Next, put the tokenizer and model making sure it has at least 128 megabytes of ram (I'm optimizing still, so this is bloated compared to the final intended requirements). The model can go anywhere, really. But the `tokenizer.bin` must be in the same directory as the compiled app.
+Now you'll have the model and tokenizer in a llama2.c-ish INT8 format. Next, put the tokenizer and model making sure it has at least 64 megabytes of ram for the 10M model and 128 megabytes for the 20M and 48M models(I'm optimizing still, so the models across the board use more ram than the Windows 95 version). The model can go anywhere, really. But the `tokenizer.bin` must be in the same directory as the compiled app.
 
 When you first launch the app, it'll want to know what model you're using first and foremost.
 
