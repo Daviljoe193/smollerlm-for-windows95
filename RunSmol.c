@@ -843,9 +843,29 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, char* c
         if (input_buf[0] == '/') {
             if (strncmp(input_buf, "/bye", 4)==0) { break; } 
             if (strncmp(input_buf, "/clear", 6)==0) { 
-                printf("Console Clear Not supported in GUI mode.\n>>> "); fflush(stdout); continue; 
-            }
+                /* Actually implement clear for Mac console */
+                printf("\f"); /* Form feed usually clears SIOUX console */
+                printf(">>> "); 
+                fflush(stdout); 
+                pos = initial_pos; /* Reset context */
+                continue; 
         }
+    if (strncmp(input_buf, "/?", 2)==0 || strncmp(input_buf, "/help", 5)==0) {
+         printf("Commands:\n");
+         printf("  /set parameter temperature <val>\n");
+         printf("  /set parameter top_k <val>\n");
+         printf("  /set parameter top_p <val>\n");
+         printf("  /clear\n");
+         printf("  /bye\n>>> ");
+         fflush(stdout);
+         continue;
+    }
+    /* Re-implemented Set Commands */
+    if (strncmp(input_buf, "/set parameter temperature", 26)==0) { samp->temperature = atof(input_buf + 27); continue; }
+    if (strncmp(input_buf, "/set parameter temp", 19)==0) { samp->temperature = atof(input_buf + 20); continue; }
+    if (strncmp(input_buf, "/set parameter top_k", 20)==0) { samp->topk = atoi(input_buf + 21); continue; }
+    if (strncmp(input_buf, "/set parameter top_p", 20)==0) { samp->topp = atof(input_buf + 21); continue; }
+}
 
         stop_generation = 0;
         n_prompt = 0;
