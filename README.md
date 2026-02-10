@@ -3,8 +3,9 @@ Just a dumb attempt at vibe coding my way into making an LLM runable on ~~Window
 
 Yep, another branch, another ridiculous port.
 
-WILL PUT IMAGE HERE EVENTUALLY.
+![WILL PUT IMAGE HERE EVENTUALLY.](https://raw.githubusercontent.com/Daviljoe193/smollerlm-for-windows95/refs/heads/amiga-3.1/llamac-smol-ghdemo-amiga-placeholder.png)
 
+###### Placeholder still, will be replaced with proper animaged demo.
 ---
 
 This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for Windows 95, then Mac OS 8.6 and 9.x, and now for Amiga Workbench 3.1.
