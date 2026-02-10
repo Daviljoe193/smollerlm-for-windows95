@@ -37,13 +37,13 @@ export PATH=$WATCOM/binl:$PATH
 Now for Pentium MMX / AMD K6 / K6_2, you'll build with
 
 ```
-wcl386 run-smol.c -fe=run_smol.exe -l=nt -bt=nt -4 -fp3 -otexan -s -d_WIN32_WINNT=0x0400
+wcl386 run-smol.c -fe=run_smol.exe -l=nt -bt=nt -5 -fp5 -otexan -s -d_WIN32_WINNT=0x0400
 ```
 
 ...or for Intel 486DX / Pentium (Scalar only. Works, but this is the masochist route!)
 
 ```
-wcl386 run-smol.c -fe=run_smol.exe -l=nt -bt=nt -5 -fp5 -otexan -s -d_WIN32_WINNT=0x0400
+wcl386 run-smol.c -fe=run_smol.exe -l=nt -bt=nt -4 -fp3 -otexan -s -d_WIN32_WINNT=0x0400
 ```
 
 Afterwards, you need an LLM and a tokenizer. Currently the scope of this project is so small that it only somewhat supports the SmollerLM family of LLMs by mehmetkeremturkcan on HuggingFace, and no other models currently work. Choose one of his models in that family (I personally went with [this 10 million parameter one](https://huggingface.co/mehmetkeremturkcan/SmollerLM2-10M-sftb), [this 20M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-20M-Instruct-PrunedPostTrained-sft2), [and this 48M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-48M-Instruct-ft-sft)), then...
