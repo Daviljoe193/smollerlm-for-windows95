@@ -924,7 +924,7 @@ void generate(Transformer *t, Tokenizer *tok, Sampler *samp, char *prompt, int s
         if (start == 0) start = time_in_ms();
     }
     printf("\n");
-    if (pos > 1) { long end = time_in_ms(); fprintf(stderr, "achieved tok/s: %f\n", (pos-1) / (double)(end-start)*1000); }
+    if (pos > 1) { long end = time_in_ms(); fprintf(stderr, "Speed: %f tok/s\n", (pos-1) / (double)(end-start)*1000); }
     free(prompt_tokens);
 }
 
@@ -1016,14 +1016,16 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
             if (strncmp(input_buf, "/?", 2)==0 || strncmp(input_buf, "/help", 5)==0) {
                  #if defined _WIN32
                  if (use_tui) {
-                     tui_append("Available Commands:\n"); tui_append("  /set parameter [temp|top_k] <val>\n");
+                     tui_append("Commands:\n"); tui_append("  /set parameter temperature <val>\n"); tui_append("  /set parameter top_k <val>\n"); tui_append("  /set parameter top_p <val>\n");
                      tui_append("  /clear\n"); tui_append("  /bye\n");
                  } else
                  #endif
                  {
                     #if !defined _WIN32
-                    printf("%sAvailable Commands:%s\n", ANSI_COLOR_BLUE, ANSI_COLOR_RESET);
-                    printf("  /set parameter [temp|top_k] <val>\n");
+                    printf("%sCommands:%s\n", ANSI_COLOR_BLUE, ANSI_COLOR_RESET);
+                    printf("  /set parameter temperature <val>\n");
+                    printf("  /set parameter top_k <val>\n");
+                    printf("  /set parameter top_p <val>\n"); /* Added */
                     printf("  /clear\n");
                     printf("  /bye\n");
                     #else
@@ -1035,6 +1037,8 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
              if (strncmp(input_buf, "/set parameter temperature", 26)==0) { samp->temperature = atof(input_buf + 27); continue; }
              if (strncmp(input_buf, "/set parameter temp", 19)==0) { samp->temperature = atof(input_buf + 20); continue; }
              if (strncmp(input_buf, "/set parameter top_k", 20)==0) { samp->topk = atoi(input_buf + 21); continue; }
+             if (strncmp(input_buf, "/set parameter top_p", 20)==0) { samp->topp = atof(input_buf + 21); continue; } /* Added */
+
         }
 
         stop_generation = 0;
@@ -1083,9 +1087,35 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, int use
     free(tokens);
 }
 
+void print_usage(char *prog) {
+    char fname[_MAX_FNAME];
+    char ext[_MAX_EXT];
+    char exe_name[_MAX_FNAME + _MAX_EXT];
+
+    // Split the path into its components
+    _splitpath(prog, NULL, NULL, fname, ext);
+    
+    // Combine filename and extension
+    strcpy(exe_name, fname);
+    strcat(exe_name, ext);
+    fprintf(stderr, "Usage:   %s <checkpoint> [options]\n", exe_name);
+    fprintf(stderr, "Example: %s model.bin -n 256 -i \"Once upon a time\"\n", exe_name);
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  -t <float>  temperature in [0,inf], default 0.8\n");
+    fprintf(stderr, "  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9\n");
+    fprintf(stderr, "  -k <int>    top-k sampling, default 40\n");
+    fprintf(stderr, "  -s <int>    random seed, default time(NULL)\n");
+    fprintf(stderr, "  -n <int>    number of steps to run for, default 256. 0 = max_seq_len\n");
+    fprintf(stderr, "  -i <string> input prompt\n");
+    fprintf(stderr, "  -z <string> optional path to custom tokenizer\n");
+    fprintf(stderr, "  -m <string> mode: generate|chat, default: chat\n");
+    fprintf(stderr, "  -y <string> (optional) system prompt in chat mode\n");
+    exit(1);
+}
+
 int main(int argc, char *argv[]) {
     char *checkpoint = NULL; char *tokenizer = "tokenizer.bin";
-    int steps = 512; float temp = 0.8f; float topp = 0.9f;
+    int steps = 512; float temp = 0.8f; float topp = 0.9f; int topk = 40;
     char *prompt = NULL; char *mode = "chat"; char *sys_prompt = NULL;
     int i; 
     unsigned long long rng_seed = 0;
@@ -1096,18 +1126,21 @@ int main(int argc, char *argv[]) {
     rng_seed = (unsigned long long)time(NULL);
 #endif
 
-    if (argc >= 2) checkpoint = argv[1]; else { fprintf(stderr, "Usage: run <model.bin> [options]\n"); exit(1); }
-    
+if (argc < 2) print_usage(argv[0]);
+checkpoint = argv[1];
+
     for (i = 2; i < argc; i+=2) {
-        if (i + 1 >= argc || argv[i][0] != '-') break;
+        if (i + 1 >= argc || argv[i][0] != '-') { print_usage(argv[0]); break; } // Added safety check
         if (argv[i][1] == 't') temp = atof(argv[i + 1]);
         else if (argv[i][1] == 'p') topp = atof(argv[i + 1]);
+        else if (argv[i][1] == 'k') topk = atoi(argv[i + 1]); /* Added -k */
         else if (argv[i][1] == 'n') steps = atoi(argv[i + 1]);
         else if (argv[i][1] == 'z') tokenizer = argv[i + 1];
         else if (argv[i][1] == 'i') prompt = argv[i + 1];
         else if (argv[i][1] == 'm') mode = argv[i + 1];
         else if (argv[i][1] == 'y') sys_prompt = argv[i + 1];
         else if (argv[i][1] == 's') rng_seed = (unsigned long long)atol(argv[i + 1]);
+        else print_usage(argv[0]);
     }
     
     srand((unsigned int)rng_seed); 
