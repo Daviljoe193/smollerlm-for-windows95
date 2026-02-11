@@ -51,7 +51,7 @@ Stack 100000
 run_smol smollerlm2_10m_q80.bin -z smoller_tokenizer.bin
 ```
 
-and interact with it more or less like you would in Ollama. It will take several seconds to a minute to load, and doesn't have a proper indicator of if you pressed enter... and also has a broken TUI "scrollbar" that I haven't fixed, requiring you to use PageUp and PageDown to scroll through the chat history. But otherwise, this is a real LLM that can run on really era-inappropriate hardware/software! Just know it's VERY slow at the moment, only about double the performance of the 486DX Windows 95 port on a 25 MHz 486DX.
+and interact with it more or less like you would in Ollama. Just know it's VERY slow at the moment, only about double the performance of the 486DX Windows 95 port on a 25 MHz 486DX.
 
 If run without any flags, it'll print out a help message.
 
