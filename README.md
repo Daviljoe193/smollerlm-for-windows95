@@ -43,7 +43,7 @@ sudo apt install cross-mint-essential
 Then simply compile it using
 
 ```
-m68k-atari-mint-gcc run_smol_atari-v5-rc.c -o smol30.tos -O3 -m68030 -m68881 -mhard-float -fomit-frame-pointer -funroll-loops -ffast-math -lm
+m68k-atari-mint-gcc run-smol.c -o smol30.tos -O3 -m68030 -m68881 -mhard-float -fomit-frame-pointer -funroll-loops -ffast-math -lm
 ```
 
 Afterwards, you need an LLM and a tokenizer. Currently the scope of this project is so small that it only somewhat supports the SmollerLM family of LLMs by mehmetkeremturkcan on HuggingFace, and no other models currently work. Choose one of his models in that family (I personally went with [this 10 million parameter one](https://huggingface.co/mehmetkeremturkcan/SmollerLM2-10M-sftb), [this 20M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-20M-Instruct-PrunedPostTrained-sft2), [and this 48M one](https://huggingface.co/mehmetkeremturkcan/SmollerLM-48M-Instruct-ft-sft)) (Currently only the 10M ver has been tested on this port), then...
