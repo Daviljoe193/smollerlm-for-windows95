@@ -5,7 +5,7 @@ Just a dumb attempt at vibe coding my way into making an LLM runable on Windows 
 
 ---
 
-This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for Windows 95.
+This is just a personal project, to modify the Llama2.c code enough to kinda-sorta recreate Ollama, but for ~~Windows 95~~ EVERYTHING.
 
 If you don't want to build everything yourself, I have a bunch of convenient prebuilds for every platform I've worked on in the releases section, [here](https://github.com/Daviljoe193/smollerlm-for-windows95/releases).
 
@@ -19,6 +19,9 @@ If you don't want to build everything yourself, I have a bunch of convenient pre
 - [x] Amiga Workbench 3.1 (Needs speed boost)
 - [ ] BeOS
 - [ ] RISC OS StrongARM and newer (This one's genuinely killing me at the moment, do NOT do this unless you hate fun)
+- [x] Atari Falcon (Via MIDI networking to pool ram)
+- [ ] Nintendo DS (Via wireless communications to pool ram)
+
 
 ---
 Onto the build instructions.
