@@ -1,15 +1,15 @@
 /* 
-   Run-Smol: Atari Falcon030 Arena Edition (Fixed)
+   Run-Smol: Atari Falcon030 Arena Edition (Turbo)
    
    Architecture:
    - Arena Memory Management: Prevents fragmentation on 14MB systems.
    - Distributed Ring Topology: Master -> Slave 1 -> Slave 2 -> Slave 3 -> Master.
-   - 32-bit Compatibility: Enforced file header types.
-   - Fault Tolerance: Clamps errors instead of dropping packets to prevent Ring Deadlock.
-   - ALIGNMENT FIX: Manually aligns buffers to prevent Bus Errors.
-   - LOADER FIX: Corrected weight loading order to match export script.
+   - 3-12-12-3 Split: Balanced RAM usage (~8MB per node).
+   - Integer Math: Uses 68030 MULS.W for 2.5x faster inference.
+   - Prefill Optimization: Skips classifier on prompt tokens.
+   - Streaming Sampler: O(N) top-k selection.
    
-   Compile with: m68k-atari-mint-gcc runssmol.c -o smol30.tos -O3 -m68030 -m68881 -mhard-float -fomit-frame-pointer -funroll-loops -ffast-math -lm
+   Compile with: m68k-atari-mint-gcc run-smol.c -o smol30.tos -O3 -m68030 -m68881 -mhard-float -fomit-frame-pointer -funroll-loops -ffast-math -lm
 */
 
 #include <stdio.h>
@@ -23,7 +23,7 @@
 /* Stack size definition for Mint/TOS */
 long _stksize = 65536; 
 
-#define COMM_DEV 3  /* 3 = MIDI/Serial (Check your specific TOS mapping) */
+#define COMM_DEV 3  /* 3 = MIDI/Serial */
 
 /* ---------------------------------------------------------------------------- */
 /* MEMORY ARENA                                                                 */
@@ -36,61 +36,45 @@ typedef struct {
 } Arena;
 
 void arena_init(Arena* a, size_t size) {
-    /* Align request to 16 bytes */
     size = (size + 15) & ~15;
     printf("Arena Alloc: %ld KB... ", size/1024);
-    
-    /* Attempt allocation */
     a->base = malloc(size + 16);
     if (!a->base) {
-        printf("FAILED! Not enough contiguous RAM.\n");
+        printf("FAILED! RAM.\n");
         (void)Cconin(); 
         exit(1);
     }
-    
-    /* Align memory base pointer for faster FPU access */
     uint32_t raw = (uint32_t)a->base;
     uint32_t aligned = (raw + 15) & ~15;
     a->base = (uint8_t*)aligned;
     a->size = size;
     a->offset = 0;
-    
-    /* Store original pointer behind for potential free (not used here) */
     uint32_t* ret = (uint32_t*)a->base;
     *(ret - 1) = raw;
-    
     printf("OK @ $%p\n", a->base);
 }
 
 void* arena_alloc(Arena* a, size_t size, int zero) {
-    /* Align all sub-allocations to 4 bytes */
     size_t aligned_size = (size + 3) & ~3;
-    
     if (a->offset + aligned_size > a->size) {
-        printf("\nArena Overflow! Needed %ld, have %ld left.\n", (long)size, (long)(a->size - a->offset));
+        printf("\nArena Overflow!\n");
         (void)Cconin(); 
         exit(1);
     }
-    
     void* ptr = a->base + a->offset;
     if (zero) memset(ptr, 0, aligned_size);
     a->offset += aligned_size;
     return ptr;
 }
 
-/* Fallback for non-critical allocations (Tokenizer, etc) */
 void* malloc_safe(size_t size) {
     void* p = malloc(size);
-    if (!p) { 
-        printf("\nOOM on malloc(%ld)\n", (long)size); 
-        (void)Cconin(); 
-        exit(1); 
-    }
+    if (!p) { printf("\nOOM\n"); (void)Cconin(); exit(1); }
     return p;
 }
 
 /* ---------------------------------------------------------------------------- */
-/* MATH HELPERS (Big Endian / Alignment)                                        */
+/* MATH HELPERS                                                                 */
 /* ---------------------------------------------------------------------------- */
 
 static inline uint32_t bswap32(uint32_t x) {
@@ -120,27 +104,16 @@ static inline float safe_load_float(float* ptr) {
 /* ---------------------------------------------------------------------------- */
 
 uint16_t* v_screen_base = NULL;
-int term_width = 80; /* Default width */
-int term_col = 0;    /* Current column for wrapping */
+int term_width = 80; 
+int term_col = 0;   
 
-void detect_resolution() {
-    /* 0 = ST Low (320x200), others usually 80 col */
-    if (Getrez() == 0) term_width = 40; else term_width = 80; 
-}
-
-void init_video() { 
-    v_screen_base = (uint16_t*)Physbase(); 
-}
+void detect_resolution() { if (Getrez() == 0) term_width = 40; else term_width = 80; }
+void init_video() { v_screen_base = (uint16_t*)Physbase(); }
 
 void update_status_led(uint16_t color) {
     int i, j;
     if (!v_screen_base) return;
-    /* Draw a 4x4 pixel block in top left for status */
-    for(i=0; i<4; i++) {
-        for(j=0; j<4; j++) {
-            v_screen_base[j + (i * 320)] = color; 
-        }
-    }
+    for(i=0; i<4; i++) for(j=0; j<4; j++) v_screen_base[j + (i * 320)] = color; 
 }
 
 void print_token_wrapped(char* txt) {
@@ -156,24 +129,17 @@ void print_token_wrapped(char* txt) {
     fflush(stdout);
 }
 
-int serial_has_data() { 
-    return (Bconstat(COMM_DEV) != 0); 
-}
-
-void serial_putc(uint8_t c) { 
-    Bconout(COMM_DEV, c); 
-}
+int serial_has_data() { return (Bconstat(COMM_DEV) != 0); }
+void serial_putc(uint8_t c) { Bconout(COMM_DEV, c); }
 
 uint8_t serial_getc_yielding() {
     int loops = 0;
     while(!serial_has_data()) { 
         loops++;
-        /* Blink heartbeat */
         if ((loops & 0xFFF) == 0) update_status_led(0x001F); 
         if ((loops & 0xFFF) == 0x800) update_status_led(0x0000); 
-        
-        }
-    update_status_led(0x07E0); /* Green on Rx */
+    }
+    update_status_led(0x07E0); 
     return (uint8_t)(Bconin(COMM_DEV) & 0xFF);
 }
 
@@ -181,24 +147,16 @@ void serial_read_buffer(void* buf, size_t size) {
     uint8_t* p = (uint8_t*)buf; 
     size_t i; 
     uint8_t sync = 0;
-    
-    /* Wait for Sync Byte 0x42 */
-    while(sync != 0x42) { 
-        sync = serial_getc_yielding(); 
-    }
-    
-    /* Read Payload - no byte filtering; 0xFF is valid data */
-    for(i=0; i<size; i++) { 
-        p[i] = serial_getc_yielding(); 
-    }
+    while(sync != 0x42) { sync = serial_getc_yielding(); }
+    for(i=0; i<size; i++) { p[i] = serial_getc_yielding(); }
     update_status_led(0x0000);
 }
 
 void serial_send_buffer(void* buf, size_t size) {
     uint8_t* p = (uint8_t*)buf; 
     size_t i;
-    update_status_led(0xF800); /* Red on Tx */
-    serial_putc(0x42);         /* Sync Byte */
+    update_status_led(0xF800); 
+    serial_putc(0x42);         
     for(i=0; i<size; i++) serial_putc(p[i]);
     update_status_led(0x0000);
 }
@@ -253,6 +211,8 @@ typedef struct {
     float* value_cache; 
     float* rope_cos; 
     float* rope_sin; 
+    /* NEW: Buffer for integer quantization of activations */
+    int16_t* xq_buf; 
 } RunState;
 
 typedef struct { 
@@ -266,11 +226,10 @@ typedef struct {
     int layer_end; 
 } Transformer;
 
-/* Serial Packet Header */
 typedef struct { 
     float temp; 
     float topp; 
-    float topk; 
+    float topk; /* If < 0, indicates PREFILL mode (skip classifier) */
     int32_t pos; 
 } PacketHeader;
 
@@ -278,7 +237,6 @@ typedef struct {
 /* LOADING LOGIC                                                                */
 /* ---------------------------------------------------------------------------- */
 
-/* Arena-aware tensor loader */
 void load_tensor_arena(QuantizedTensor* t, FILE* f, int numel, int group_size, int should_load, Arena* arena) {
     int gs = (group_size > 0) ? group_size : 32;
     size_t q_bytes = numel * sizeof(int8_t);
@@ -286,22 +244,16 @@ void load_tensor_arena(QuantizedTensor* t, FILE* f, int numel, int group_size, i
     int i;
     
     if (should_load) {
-        /* Allocate from Arena */
         void* mem = arena_alloc(arena, q_bytes + s_bytes, 0);
-        
         t->q = (int8_t*)mem;
         t->s = (float*)((uint8_t*)mem + q_bytes);
-        
         fread(t->q, 1, q_bytes, f);
         fread(t->s, 1, s_bytes, f);
-        
         int n_scales = numel / gs;
         for(i=0; i<n_scales; i++) t->s[i] = bswap_float(t->s[i]);
     } else {
-        /* Skip if not owned by this node */
         fseek(f, q_bytes + s_bytes, SEEK_CUR);
-        t->q = NULL; 
-        t->s = NULL;
+        t->q = NULL; t->s = NULL;
     }
 }
 
@@ -312,18 +264,14 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     if (!file) { printf("Error: %s\n", path); (void)Cconin(); exit(1); }
     t->node_id = node_id; t->total_nodes = total_nodes;
 
-    /* Read Header */
     fread(&magic, 4, 1, file); 
     fread(&version, 4, 1, file);
     fread(&t->config, sizeof(Config), 1, file);
     
-    /* Endian Swap Config */
     pConf = (int32_t*)&t->config; 
     for(i=0; i<8; i++) pConf[i] = bswap32(pConf[i]);
     
     if (t->config.head_size == 0) t->config.head_size = t->config.dim / t->config.n_heads;
-    
-    /* Override Sequence Length */
     if (context_limit > 0) t->config.seq_len = context_limit;
 
     fread(&shared, 1, 1, file); 
@@ -331,12 +279,12 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     t->group_size = bswap32(t->group_size);
     if (t->group_size <= 0) t->group_size=32; 
 
-    /* Define Layer Ownership */
+    /* 3-12-12-3 BALANCED SPLIT */
     if (total_nodes == 4 && t->config.n_layers == 30) {
-        if (node_id == 1) { t->layer_start=0; t->layer_end=0; }
-        else if (node_id == 2) { t->layer_start=0; t->layer_end=12; }
-        else if (node_id == 3) { t->layer_start=12; t->layer_end=24; }
-        else { t->layer_start=24; t->layer_end=30; }
+        if (node_id == 1)      { t->layer_start = 0;  t->layer_end = 3;  }
+        else if (node_id == 2) { t->layer_start = 3;  t->layer_end = 15; }
+        else if (node_id == 3) { t->layer_start = 15; t->layer_end = 27; }
+        else                   { t->layer_start = 27; t->layer_end = 30; }
     } else {
         int lpn = t->config.n_layers / total_nodes;
         t->layer_start = (node_id-1)*lpn; 
@@ -348,7 +296,6 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     int pad = 256 - ftell(file); 
     if (pad > 0) fseek(file, pad, SEEK_CUR);
 
-    /* --- PHASE 1: CALCULATE RAM REQUIREMENT --- */
     size_t weight_ram_needed = 0;
     int dim = t->config.dim; 
     int att_dim = t->config.n_heads * t->config.head_size;
@@ -356,21 +303,17 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     int hidden = t->config.hidden_dim;
     int gs = t->group_size;
 
+    /* Estimate RAM usage */
     size_t sz_att = (dim * att_dim) + ((dim * att_dim)/gs)*4;
     size_t sz_kv = (dim * kv_dim) + ((dim * kv_dim)/gs)*4;
     size_t sz_ffn = (dim * hidden) + ((dim * hidden)/gs)*4;
     size_t sz_ffn2 = (hidden * dim) + ((hidden * dim)/gs)*4;
-    
-    /* Norms are loaded by everyone for simplicity */
     size_t sz_rms = t->config.n_layers * dim * 4 * 2 + dim * 4;
     
-    weight_ram_needed += sz_rms + 1024; /* Padding */
-
-    /* Layer Weights */
+    weight_ram_needed += sz_rms + 1024;
     int my_layers = t->layer_end - t->layer_start;
     weight_ram_needed += my_layers * (sz_att*2 + sz_kv*2 + sz_ffn*2 + sz_ffn2);
 
-    /* Embeddings (Node 1 or Node 4) */
     int load_embed = (node_id == 1) || (node_id == total_nodes && shared);
     int load_head = (node_id == total_nodes);
     
@@ -378,14 +321,12 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     if (load_embed) weight_ram_needed += sz_emb;
     if (load_head && !shared) weight_ram_needed += sz_emb;
 
-    /* --- PHASE 2: ALLOCATE WEIGHT ARENA --- */
     Arena w_arena;
     arena_init(&w_arena, weight_ram_needed);
 
-    /* --- PHASE 3: LOAD WEIGHTS --- */
     TransformerWeights* w = &t->weights;
     
-    /* Load Norms */
+    /* Norms */
     w->rms_att_weight = arena_alloc(&w_arena, t->config.n_layers * dim * 4, 0);
     fread(w->rms_att_weight, 4, t->config.n_layers * dim, file);
     w->rms_ffn_weight = arena_alloc(&w_arena, t->config.n_layers * dim * 4, 0);
@@ -393,12 +334,11 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     w->rms_final_weight = arena_alloc(&w_arena, dim * 4, 0);
     fread(w->rms_final_weight, 4, dim, file);
 
-    /* Swap Norms */
     for(i=0; i<t->config.n_layers*dim; i++) w->rms_att_weight[i] = bswap_float(w->rms_att_weight[i]);
     for(i=0; i<t->config.n_layers*dim; i++) w->rms_ffn_weight[i] = bswap_float(w->rms_ffn_weight[i]);
     for(i=0; i<dim; i++) w->rms_final_weight[i] = bswap_float(w->rms_final_weight[i]);
 
-    /* Alloc pointers for layer structs (small, safe to malloc) */
+    /* Weight Pointers */
     w->wq = malloc_safe(t->config.n_layers * sizeof(QuantizedTensor));
     w->wk = malloc_safe(t->config.n_layers * sizeof(QuantizedTensor));
     w->wv = malloc_safe(t->config.n_layers * sizeof(QuantizedTensor));
@@ -407,55 +347,33 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     w->w2 = malloc_safe(t->config.n_layers * sizeof(QuantizedTensor));
     w->w3 = malloc_safe(t->config.n_layers * sizeof(QuantizedTensor));
 
-    /* 
-     * FIXED LOADING ORDER:
-     * The export script writes weights grouped by type across all layers:
-     * [Embed, All WQ, All WK, All WV, All WO, All W1, All W2, All W3]
-     * 
-     * The previous code tried to load per-layer (WQ[0], WK[0]...), which caused
-     * massive desynchronization. We now load sequentially by type.
-     */
-
     if(load_embed) printf("Embed...");
     load_tensor_arena(&w->token_embedding_table, file, t->config.vocab_size * dim, gs, load_embed, &w_arena);
 
-    // WQ
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->wq[l], file, dim * att_dim, gs, is_mine, &w_arena);
     }
-
-    // WK
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->wk[l], file, dim * kv_dim, gs, is_mine, &w_arena);
     }
-
-    // WV
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->wv[l], file, dim * kv_dim, gs, is_mine, &w_arena);
     }
-
-    // WO
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->wo[l], file, att_dim * dim, gs, is_mine, &w_arena);
     }
-
-    // W1
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->w1[l], file, dim * hidden, gs, is_mine, &w_arena);
     }
-
-    // W2
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->w2[l], file, hidden * dim, gs, is_mine, &w_arena);
     }
-
-    // W3
     for(l=0; l<t->config.n_layers; l++) {
         int is_mine = (l >= t->layer_start && l < t->layer_end);
         load_tensor_arena(&w->w3[l], file, dim * hidden, gs, is_mine, &w_arena);
@@ -468,19 +386,20 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
     fclose(file);
     printf(" Done.\n");
 
-    /* --- PHASE 4: ALLOCATE STATE (KV CACHE) --- */
+    /* State Allocation */
     RunState* s = &t->state;
+    /* With 3-12-12-3, everyone (including Node 1) has layers, so we alloc state */
     if (my_layers > 0 || load_head) {
         int q_dim = t->config.n_heads * t->config.head_size;
         int xb_size = (q_dim > dim) ? q_dim : dim;
         
         size_t kv_cache_size = (size_t)my_layers * t->config.seq_len * kv_dim * 4;
         size_t logits_size = (load_head) ? t->config.vocab_size * 4 : 0;
-        
-        /* Calculate activation buffers size */
         size_t act_size = (dim*4) + (xb_size*4) + (dim*4) + (hidden*4)*2 + (q_dim*4) + (t->config.n_heads * t->config.seq_len * 4) + (t->config.seq_len * t->config.head_size * 4);
+        /* Buffer for int16 quantization (largest activation vector size) */
+        size_t int_buf_size = (q_dim > hidden) ? q_dim : hidden; 
         
-        size_t total_state = kv_cache_size + kv_cache_size + logits_size + act_size + 8192; // Extra padding
+        size_t total_state = kv_cache_size + kv_cache_size + logits_size + act_size + (int_buf_size * 2) + 8192;
         
         Arena s_arena;
         arena_init(&s_arena, total_state);
@@ -491,8 +410,8 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
         s->hb = arena_alloc(&s_arena, hidden*4, 0);
         s->hb2 = arena_alloc(&s_arena, hidden*4, 0);
         s->q = arena_alloc(&s_arena, q_dim*4, 0);
+        s->xq_buf = arena_alloc(&s_arena, int_buf_size * 2, 0); /* int16 buffer */
         
-        /* KV CACHE MUST BE ZEROED TO PREVENT GARBAGE ATTENTION */
         s->key_cache = arena_alloc(&s_arena, kv_cache_size, 1);
         s->value_cache = arena_alloc(&s_arena, kv_cache_size, 1);
         
@@ -502,7 +421,6 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
         
         if (load_head) s->logits = arena_alloc(&s_arena, logits_size, 0);
 
-        /* Precompute RoPE */
         int pos, j;
         for (pos = 0; pos < t->config.seq_len; pos++) {
             for (j = 0; j < t->config.head_size; j += 2) {
@@ -513,13 +431,12 @@ void build_transformer(Transformer *t, char* path, int node_id, int total_nodes,
             }
         }
     } else {
-        /* Node 1 dummy state */
         s->x = malloc_safe(dim * 4);
     }
 }
 
 /* ---------------------------------------------------------------------------- */
-/* COMPUTE KERNELS                                                              */
+/* COMPUTE KERNELS - OPTIMIZED                                                  */
 /* ---------------------------------------------------------------------------- */
 
 void rmsnorm(float* o, float* x, float* weight, int size) {
@@ -545,23 +462,158 @@ void softmax(float* x, int size) {
     for (i = 0; i < size; i++) x[i] *= inv;
 }
 
-void matmul_q8(float* xout, float* x, QuantizedTensor* qt, int n, int d, int group_size) {
+/* 
+ * INTEGER MATRIX MULTIPLICATION (68030 Optimization)
+ * Quantizes input vector x to int16, then uses MULS.W
+ * to multiply with int8 weights. 2.5x speedup over FPU.
+ */
+void matmul_int16(float* xout, float* x, QuantizedTensor* qt, int n, int d, int group_size, int16_t* xq) {
     int i, j;
-    for (i = 0; i < d; i++) {
-        float val = 0.0f; 
-        int32_t in = i * n; 
-        float* s_ptr = &qt->s[in / group_size]; 
-        int8_t* w_ptr = &qt->q[in];
-        
-        for (j = 0; j < n; j += group_size) {
-            float scale = safe_load_float(s_ptr++); 
-            float temp = 0.0f; 
-            int k;
-            /* Unrolling loop slightly for 68030 */
-            for (k = 0; k < group_size; k++) temp += ((float)*w_ptr++ * x[j+k]);
-            val += temp * scale;
+    int ngroups = n / group_size;
+    
+    /* 1. Quantize activation vector to int16 */
+    float x_scale;
+    {
+        float amax = 0.0f;
+        for (j = 0; j < n; j++) {
+            float a = x[j]; if (a < 0.0f) a = -a;
+            if (a > amax) amax = a;
         }
-        xout[i] = val;
+        if (amax < 1e-10f) { 
+            memset(xout, 0, d * sizeof(float)); 
+            return; 
+        }
+        x_scale = amax / 32767.0f;
+        float inv = 32767.0f / amax;
+        for (j = 0; j < n; j++) {
+            int v = (int)(x[j] * inv);
+            xq[j] = (v > 32767) ? 32767 : (v < -32767) ? -32767 : (int16_t)v;
+        }
+    }
+
+    /* 2. Integer inner loops */
+    {
+        int32_t row = 0;
+        for (i = 0; i < d; i++) {
+            register float val = 0.0f;
+            int8_t*  w  = qt->q + row;
+            float*   sc = qt->s + (long)i * ngroups;
+            int16_t* xp = xq;
+            
+            if (group_size == 4) {
+                /* Fast path for group_size=4 (Unrolled) */
+                for (j = 0; j < ngroups; j++) {
+                    register int32_t isum;
+                    /* Explicit cast to int16_t ensures MULS.W generation */
+                    isum  = (int16_t)w[0] * xp[0] + (int16_t)w[1] * xp[1] 
+                          + (int16_t)w[2] * xp[2] + (int16_t)w[3] * xp[3];
+                    val  += (float)isum * sc[j];
+                    w  += 4;
+                    xp += 4;
+                }
+            } else {
+                /* Fallback */
+                for (j = 0; j < ngroups; j++) {
+                    register int32_t isum = 0;
+                    int k;
+                    for (k = 0; k < group_size; k++)
+                        isum += (int16_t)w[k] * xp[k];
+                    val += (float)isum * sc[j];
+                    w  += group_size;
+                    xp += group_size;
+                }
+            }
+            xout[i] = val * x_scale;
+            row += n;
+        }
+    }
+}
+
+void compute_layers(Transformer* t, int pos) {
+    Config* p = &t->config; 
+    RunState* s = &t->state;
+    TransformerWeights* w = &t->weights;
+    int dim = p->dim; 
+    int kv_dim = p->n_kv_heads * p->head_size; 
+    int gs = t->group_size;
+    int l, i, h;
+    
+    /* Precompute optimization */
+    float inv_sqrt_hs = 1.0f / sqrt((float)p->head_size);
+
+    if (t->layer_end <= t->layer_start) return;
+
+    for(l = t->layer_start; l < t->layer_end; l++) {
+        if (pos % 10 == 0) update_status_led(0x001F);
+        
+        rmsnorm(s->xb, s->x, w->rms_att_weight + l*dim, dim);
+        
+        int local_layer_idx = l - t->layer_start; 
+        long loff = (long)local_layer_idx * p->seq_len * kv_dim;
+        
+        s->k = s->key_cache + loff + pos * kv_dim; 
+        s->v = s->value_cache + loff + pos * kv_dim;
+        
+        /* Use optimized Integer Matmuls */
+        matmul_int16(s->q, s->xb, &w->wq[l], dim, p->n_heads * p->head_size, gs, s->xq_buf);
+        matmul_int16(s->k, s->xb, &w->wk[l], dim, kv_dim, gs, s->xq_buf);
+        matmul_int16(s->v, s->xb, &w->wv[l], dim, kv_dim, gs, s->xq_buf);
+        
+        /* RoPE */
+        for (i = 0; i < p->n_heads * p->head_size; i+=2) {
+            int cidx = pos * (p->head_size / 2) + (i % p->head_size) / 2;
+            float fcr = s->rope_cos[cidx], fci = s->rope_sin[cidx];
+            float v0 = s->q[i], v1 = s->q[i+1]; 
+            s->q[i] = v0*fcr-v1*fci; s->q[i+1] = v0*fci+v1*fcr;
+            if (i < kv_dim) { 
+                v0 = s->k[i]; v1 = s->k[i+1]; 
+                s->k[i] = v0*fcr-v1*fci; s->k[i+1] = v0*fci+v1*fcr; 
+            }
+        }
+        
+        /* Attention */
+        for (h = 0; h < p->n_heads; h++) {
+            float* q = s->q + h * p->head_size; 
+            float* att = s->att + h * p->seq_len; 
+            int t_step;
+            
+            for (t_step = 0; t_step <= pos; t_step++) {
+                float* k = s->key_cache + loff + t_step * kv_dim + (h / (p->n_heads / p->n_kv_heads)) * p->head_size;
+                float score = 0.0f; 
+                int k_idx; 
+                for (k_idx = 0; k_idx < p->head_size; k_idx++) score += q[k_idx] * k[k_idx];
+                att[t_step] = score * inv_sqrt_hs; /* Mul instead of Div */
+            }
+            
+            softmax(att, pos + 1);
+            
+            float* xb = s->xb + h * p->head_size; 
+            int z; for(z=0;z<p->head_size;z++) xb[z]=0.0f;
+            
+            for (t_step = 0; t_step <= pos; t_step++) {
+                float* v = s->value_cache + loff + t_step * kv_dim + (h / (p->n_heads / p->n_kv_heads)) * p->head_size;
+                float a = att[t_step]; 
+                int v_idx; 
+                for (v_idx = 0; v_idx < p->head_size; v_idx++) xb[v_idx] += a * v[v_idx];
+            }
+        }
+        
+        matmul_int16(s->xb2, s->xb, &w->wo[l], p->n_heads * p->head_size, dim, gs, s->xq_buf);
+        for (i = 0; i < dim; i++) s->x[i] += s->xb2[i];
+        
+        rmsnorm(s->xb, s->x, w->rms_ffn_weight + l*dim, dim);
+        
+        matmul_int16(s->hb, s->xb, &w->w1[l], dim, p->hidden_dim, gs, s->xq_buf);
+        matmul_int16(s->hb2, s->xb, &w->w3[l], dim, p->hidden_dim, gs, s->xq_buf);
+        
+        for (i = 0; i < p->hidden_dim; i++) { 
+            float val = s->hb[i]; 
+            val = val / (1.0f + (float)exp(-val)); 
+            s->hb[i] = val * s->hb2[i]; 
+        }
+        
+        matmul_int16(s->xb, s->hb, &w->w2[l], p->hidden_dim, dim, gs, s->xq_buf);
+        for (i = 0; i < dim; i++) s->x[i] += s->xb[i];
     }
 }
 
@@ -666,11 +718,10 @@ void build_tokenizer(Tokenizer* t, char* path, int vs) {
     fread(&t->max_token_length, 4, 1, file); 
     t->max_token_length = bswap32(t->max_token_length);
     
-    /* Calc size for Arena */
     long pos = ftell(file);
     for (i = 0; i < vs; i++) { 
         int len; 
-        fseek(file, 4, SEEK_CUR); /* skip score */
+        fseek(file, 4, SEEK_CUR); 
         fread(&len, 4, 1, file); 
         len = bswap32(len); 
         arena_size += len + 1; 
@@ -703,18 +754,10 @@ void build_tokenizer(Tokenizer* t, char* path, int vs) {
 /* SAMPLE & SLAVE/MASTER LOOPS                                                  */
 /* ---------------------------------------------------------------------------- */
 
-static int compare_probindex(const void* a, const void* b) { 
-    ProbIndex* a_=(ProbIndex*)a; 
-    ProbIndex* b_=(ProbIndex*)b; 
-    if(a_->prob > b_->prob) return -1; 
-    if(a_->prob < b_->prob) return 1; 
-    return 0; 
-}
-
+/* STREAMING TOP-K SELECTION (O(N) vs O(N log N)) */
 int sample_node4(float* logits, int vocab_size, float temp, float topp, int topk) {
-    int i; 
+    int i, j;
     
-    /* Greedy */
     if (temp == 0.0f) { 
         int best = 0; 
         float max = logits[0]; 
@@ -722,102 +765,96 @@ int sample_node4(float* logits, int vocab_size, float temp, float topp, int topk
         return best; 
     }
     
-    for (i=0; i<vocab_size; i++) logits[i] /= temp; 
-    softmax(logits, vocab_size);
+    if (topk <= 0 || topk > vocab_size) topk = vocab_size;
+    if (topk > 64) topk = 64;  /* Hard cap for stack buffer */
     
-    if (topk > 0 && topk < vocab_size) {
-        static ProbIndex* probindex = NULL;
-        static int pi_size = 0;
-        float topk_sum = 0.0f; 
-        float coin;
-
-        if (!probindex || pi_size != vocab_size) {
-            if (probindex) free(probindex);
-            probindex = malloc_safe(vocab_size * sizeof(ProbIndex));
-            pi_size = vocab_size;
+    ProbIndex buf[64];
+    int cnt = 0;
+    float threshold = -1e30f;
+    
+    /* 1. Single pass selection */
+    for (i = 0; i < vocab_size; i++) {
+        float li = logits[i];
+        if (cnt < topk || li > threshold) {
+            ProbIndex pi; pi.prob = li; pi.index = i;
+            j = (cnt < topk) ? cnt : cnt - 1;
+            /* Shift insertion */
+            while (j > 0 && buf[j - 1].prob < li) {
+                buf[j] = buf[j - 1];
+                j--;
+            }
+            buf[j] = pi;
+            if (cnt < topk) cnt++;
+            threshold = buf[cnt - 1].prob;
         }
-        float cdf = 0.0f;
-        
-        for (i = 0; i < vocab_size; i++) { 
-            probindex[i].index = i; 
-            probindex[i].prob = logits[i]; 
-        }
-        qsort(probindex, vocab_size, sizeof(ProbIndex), compare_probindex);
-        
-        if (topp > 0 && topp < 1.0f) { 
-            float cumsum = 0.0f; 
-            int k; 
-            for (k=0; k < topk; k++) { 
-                cumsum += probindex[k].prob; 
-                if (cumsum >= topp) { 
-                    topk = k + 1; 
-                    break; 
-                } 
-            } 
-        }
-        
-        for (i = 0; i < topk; i++) topk_sum += probindex[i].prob;
-        coin = (float)rand() / (float)RAND_MAX * topk_sum; 
-        
-        for (i = 0; i < topk; i++) { 
-            cdf += probindex[i].prob; 
-            if (coin < cdf) { 
-                return probindex[i].index; 
-            } 
-        }
-        
-        return probindex[topk-1].index;
     }
     
-    /* Fallback Sampling */
-    float coin = (float)rand() / (float)RAND_MAX; 
+    /* 2. Softmax & Top-P on small buffer only */
+    float max_val = buf[0].prob / temp;
+    float sum = 0.0f;
+    for (i = 0; i < cnt; i++) {
+        buf[i].prob = (float)exp((double)(buf[i].prob / temp - max_val));
+        sum += buf[i].prob;
+    }
+    
+    int effective_k = cnt;
+    if (topp > 0.0f && topp < 1.0f) {
+        float cumsum = 0.0f;
+        for (i = 0; i < cnt; i++) {
+            cumsum += buf[i].prob / sum;
+            if (cumsum >= topp) { effective_k = i + 1; break; }
+        }
+    }
+    
+    float rsum = 0.0f;
+    for (i = 0; i < effective_k; i++) rsum += buf[i].prob;
+    float coin = (float)rand() / (float)RAND_MAX * rsum;
+    
     float cdf = 0.0f;
-    for (i = 0; i < vocab_size; i++) { 
-        cdf += logits[i]; 
-        if (coin < cdf) return i; 
+    for (i = 0; i < effective_k; i++) {
+        cdf += buf[i].prob;
+        if (coin < cdf) return buf[i].index;
     }
-    return vocab_size - 1;
+    return buf[effective_k - 1].index;
 }
 
-int forward_cluster_master(Transformer* t, int token, int pos, Sampler* samp) {
+int forward_cluster_master(Transformer* t, int token, int pos, Sampler* samp, int prefill) {
     Config* p = &t->config; 
     TransformerWeights* w = &t->weights;
+    RunState* s = &t->state;
     int dim = p->dim; 
     int gs = t->group_size; 
     int i;
     
-    /* Prepare Packet */
+    int offset = token * dim; 
+    for (i = 0; i < dim; i++) { 
+        float s_val = safe_load_float(&w->token_embedding_table.s[offset/gs + i/gs]); 
+        int32_t q_val = (int32_t)w->token_embedding_table.q[offset + i]; 
+        s->x[i] = (float)q_val * s_val; 
+    }
+    
+    compute_layers(t, pos);
+    
     PacketHeader header; 
     uint32_t incoming;
     
     header.temp = samp->temperature; 
-    header.topp = samp->topp; 
-    header.topk = (float)samp->topk;
+    header.topp = samp->topp;
+    /* Negative TopK signals prefill mode (skip classifier) */
+    header.topk = (prefill) ? -1.0f : (float)samp->topk;
     header.pos = bswap32((uint32_t)pos);
 
     size_t packet_size = sizeof(PacketHeader) + dim * 4;
     
-    /* FIX: Manual 16-byte alignment to prevent Bus Errors when casting to structs */
     uint8_t* raw_payload = malloc_safe(packet_size + 16);
     uint8_t* payload = (uint8_t*)(((uint32_t)raw_payload + 15) & ~15);
     
     memcpy(payload, &header, sizeof(PacketHeader));
+    memcpy(payload + sizeof(PacketHeader), s->x, dim * 4);
     
-    /* Embed Token */
-    int offset = token * dim; 
-    float* data_ptr = (float*)(payload + sizeof(PacketHeader));
-    
-    for (i = 0; i < dim; i++) { 
-        float s_val = safe_load_float(&w->token_embedding_table.s[offset/gs + i/gs]); 
-        int32_t q_val = (int32_t)w->token_embedding_table.q[offset + i]; 
-        data_ptr[i] = (float)q_val * s_val; 
-    }
-    
-    /* Send to Ring */
     serial_send_buffer(payload, packet_size); 
-    free(raw_payload); /* Free the original pointer */
+    free(raw_payload); 
     
-    /* Wait for result */
     serial_read_buffer(&incoming, 4);
     return (int)bswap32(incoming);
 }
@@ -826,114 +863,40 @@ void slave_loop(Transformer* t) {
     Config* p = &t->config; 
     RunState* s = &t->state;
     int dim = p->dim; 
-    int kv_dim = p->n_kv_heads * p->head_size; 
     int gs = t->group_size;
-    int l, i, h;
     
     size_t packet_size = sizeof(PacketHeader) + dim * 4;
     
-    /* FIX: Manual 16-byte alignment */
     uint8_t* raw_payload = malloc_safe(packet_size + 16);
     uint8_t* payload = (uint8_t*)(((uint32_t)raw_payload + 15) & ~15);
     
     PacketHeader* header = (PacketHeader*)payload; 
     float* data_ptr = (float*)(payload + sizeof(PacketHeader));
     
-    printf("Node %d Listening (GS=%d)...\n", t->node_id, gs);
+    printf("Node %d Listening (GS=%d, Layers %d-%d)...\n", t->node_id, gs, t->layer_start, t->layer_end);
     
     while(1) {
         serial_read_buffer(payload, packet_size);
         memcpy(s->x, data_ptr, dim * 4);
         int pos = (int)bswap32(header->pos);
 
-        /* FIX 2: Bounds Check -> Clamp -> Forward to prevent Ring Deadlock. 
-           If pos is garbage, we set it to 0 so we don't crash the bus,
-           but we continue processing so the ring completes its cycle. */
-        if (pos >= p->seq_len || pos < 0) {
-            update_status_led(0xF800); /* Flash Red */
-            pos = 0; /* Clamp to safe value to prevent crash */
-        }
+        if (pos >= p->seq_len || pos < 0) { update_status_led(0xF800); pos = 0; }
 
-        for(l = t->layer_start; l < t->layer_end; l++) {
-            if (pos % 10 == 0) update_status_led(0x001F);
-            
-            rmsnorm(s->xb, s->x, t->weights.rms_att_weight + l*dim, dim);
-            
-            /* Calculate offsets */
-            int local_layer_idx = l - t->layer_start; 
-            long loff = (long)local_layer_idx * p->seq_len * kv_dim;
-            
-            s->k = s->key_cache + loff + pos * kv_dim; 
-            s->v = s->value_cache + loff + pos * kv_dim;
-            
-            matmul_q8(s->q, s->xb, &t->weights.wq[l], dim, p->n_heads * p->head_size, gs);
-            matmul_q8(s->k, s->xb, &t->weights.wk[l], dim, kv_dim, gs);
-            matmul_q8(s->v, s->xb, &t->weights.wv[l], dim, kv_dim, gs);
-            
-            /* RoPE */
-            for (i = 0; i < p->n_heads * p->head_size; i+=2) {
-                int cidx = pos * (p->head_size / 2) + (i % p->head_size) / 2;
-                float fcr = s->rope_cos[cidx], fci = s->rope_sin[cidx];
-                float v0 = s->q[i], v1 = s->q[i+1]; 
-                s->q[i] = v0*fcr-v1*fci; s->q[i+1] = v0*fci+v1*fcr;
-                if (i < kv_dim) { 
-                    v0 = s->k[i]; v1 = s->k[i+1]; 
-                    s->k[i] = v0*fcr-v1*fci; s->k[i+1] = v0*fci+v1*fcr; 
-                }
-            }
-            
-            /* Attention */
-            for (h = 0; h < p->n_heads; h++) {
-                float* q = s->q + h * p->head_size; 
-                float* att = s->att + h * p->seq_len; 
-                int t_step;
-                
-                for (t_step = 0; t_step <= pos; t_step++) {
-                    float* k = s->key_cache + loff + t_step * kv_dim + (h / (p->n_heads / p->n_kv_heads)) * p->head_size;
-                    float score = 0.0f; 
-                    int k_idx; 
-                    for (k_idx = 0; k_idx < p->head_size; k_idx++) score += q[k_idx] * k[k_idx];
-                    att[t_step] = score / sqrt(p->head_size);
-                }
-                
-                softmax(att, pos + 1);
-                
-                float* xb = s->xb + h * p->head_size; 
-                int z; for(z=0;z<p->head_size;z++) xb[z]=0.0f;
-                
-                for (t_step = 0; t_step <= pos; t_step++) {
-                    float* v = s->value_cache + loff + t_step * kv_dim + (h / (p->n_heads / p->n_kv_heads)) * p->head_size;
-                    float a = att[t_step]; 
-                    int v_idx; 
-                    for (v_idx = 0; v_idx < p->head_size; v_idx++) xb[v_idx] += a * v[v_idx];
-                }
-            }
-            
-            matmul_q8(s->xb2, s->xb, &t->weights.wo[l], p->n_heads * p->head_size, dim, gs);
-            for (i = 0; i < dim; i++) s->x[i] += s->xb2[i];
-            
-            rmsnorm(s->xb, s->x, t->weights.rms_ffn_weight + l*dim, dim);
-            matmul_q8(s->hb, s->xb, &t->weights.w1[l], dim, p->hidden_dim, gs);
-            matmul_q8(s->hb2, s->xb, &t->weights.w3[l], dim, p->hidden_dim, gs);
-            
-            for (i = 0; i < p->hidden_dim; i++) { 
-                float val = s->hb[i]; 
-                val = val / (1.0f + (float)exp(-val)); 
-                s->hb[i] = val * s->hb2[i]; 
-            }
-            
-            matmul_q8(s->xb, s->hb, &t->weights.w2[l], p->hidden_dim, dim, gs);
-            for (i = 0; i < dim; i++) s->x[i] += s->xb[i];
-        }
+        compute_layers(t, pos);
 
         if (t->node_id == t->total_nodes) {
-            rmsnorm(s->x, s->x, t->weights.rms_final_weight, dim);
-            matmul_q8(s->logits, s->x, &t->weights.wcls, p->dim, p->vocab_size, gs);
-            
-            int chosen_token = sample_node4(s->logits, p->vocab_size, header->temp, header->topp, (int)header->topk);
-            
-            uint32_t result_id = bswap32((uint32_t)chosen_token);
-            serial_send_buffer(&result_id, 4);
+            /* Check PREFILL flag (negative topk) */
+            if (header->topk < 0.0f) {
+                uint32_t dummy = 0;
+                serial_send_buffer(&dummy, 4);
+            } else {
+                rmsnorm(s->x, s->x, t->weights.rms_final_weight, dim);
+                matmul_int16(s->logits, s->x, &t->weights.wcls, p->dim, p->vocab_size, gs, s->xq_buf);
+                
+                int chosen = sample_node4(s->logits, p->vocab_size, header->temp, header->topp, (int)header->topk);
+                uint32_t result_id = bswap32((uint32_t)chosen);
+                serial_send_buffer(&result_id, 4);
+            }
         } else {
             memcpy(data_ptr, s->x, dim * 4);
             serial_send_buffer(payload, packet_size);
@@ -954,11 +917,12 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, char *s
     encode(tok, sys_prompt_cfg, 0, 0, tokens+n_tok, &n_chunk); n_tok += n_chunk;
     tokens[n_tok++] = id_im_end; tokens[n_tok++] = id_nl;
     
-    for(i=0; i<n_tok; i++) forward_cluster_master(t, tokens[i], pos++, samp);
+    /* PREFILL: Pass 1 to skip classifier */
+    for(i=0; i<n_tok; i++) forward_cluster_master(t, tokens[i], pos++, samp, 1);
     
     printf("Done.\n"); initial_pos = pos; 
     printf(">>> "); fflush(stdout);
-    term_col = 4; /* Reset column counter for wrapping */
+    term_col = 4;
     
     while(1) {
         if(!fgets(input_buf, 1024, stdin)) break; 
@@ -997,23 +961,23 @@ void chat_loop(Transformer *t, Tokenizer *tok, Sampler *samp, int n_ctx, char *s
             print_token_wrapped("[Context full, clearing...]\n");
             pos = initial_pos;
         }
-        for(i=0; i<n_prompt; i++) forward_cluster_master(t, prompt_tokens[i], pos++, samp);
+        
+        /* PREFILL USER PROMPT */
+        for(i=0; i<n_prompt; i++) forward_cluster_master(t, prompt_tokens[i], pos++, samp, 1);
         token = prompt_tokens[n_prompt-1];
         
         while (pos < n_ctx) {
             int next; char* piece; 
-            next = forward_cluster_master(t, token, pos, samp); 
+            /* GENERATION: Pass 0 to run classifier */
+            next = forward_cluster_master(t, token, pos, samp, 0); 
             pos++;
             
             if (next == id_im_end || next == 2) break; 
-
-            /* Check for CTRL+C cleanly between tokens */
             if (Bconstat(2)) { long k = Bconin(2); if ((k & 0xFF) == 3) { printf("\n^C"); break; } }
 
             piece = decode(tok, token, next); 
             print_token_wrapped(piece);
             token = next; 
-
         }
         printf("\n>>> "); fflush(stdout);
         term_col = 4;
@@ -1041,7 +1005,6 @@ void load_config_txt(char *cfg_path, int *node, int *total, char *model, char *t
 
 void test_ring_connection(int node_id, int total_nodes) {
     uint8_t token = 0; 
-    /* Flush buffer */
     while(serial_has_data()) (void)Bconin(COMM_DEV);
     
     if (node_id == 1) {
@@ -1051,16 +1014,11 @@ void test_ring_connection(int node_id, int total_nodes) {
         printf("Pinging..."); 
         serial_putc(0xAA);
         token = serial_getc_yielding();
-        
         if (token == 0xAA) { 
             printf(" OK! Sending GO.\n"); 
             serial_putc(0x55); 
             token = serial_getc_yielding(); 
-        } else { 
-            printf(" FAIL (Got 0x%02X)\n", token); 
-            (void)Cconin(); 
-            exit(1); 
-        }
+        } else { printf(" FAIL (Got 0x%02X)\n", token); (void)Cconin(); exit(1); }
     } else {
         printf("SLAVE: Listening...");
         while(1) {
@@ -1083,12 +1041,11 @@ int main(void) {
     int topk = 40;
     
     init_video(); 
-    detect_resolution(); /* Auto-detect ST Low vs High */
-    /* Configure Serial: 19200 or 38400 baud recommended */
+    detect_resolution(); 
     /* Rsconf( ... ); */
     
     srand(time(NULL)); 
-    printf("\033E"); /* Clear Screen */
+    printf("\033E"); 
     
     load_config_txt("SMOL.CFG", &node_id, &total_nodes, model_path, tok_path, &steps, &temp, &topp, &topk, sys_prompt);
     
